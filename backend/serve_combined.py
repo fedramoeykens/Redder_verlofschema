@@ -1,16 +1,15 @@
 import os
 from fastapi.staticfiles import StaticFiles
-from app import app  # your unmodified app.py
+from app import app
 
-app.router.routes = [r for r in app.router.routes if getattr(r, "path", None) != "/"]
-
-FRONTEND_DIST = os.path.join(os.getcwd(), "dist")
+# dist/ is built at repo root, we're running from backend/
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "dist")
 
 if os.path.isdir(FRONTEND_DIST):
     app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
 else:
-    print("WARNING: dist folder not found. React build missing.")
-    
+    print("WARNING: dist/ not found.")
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))

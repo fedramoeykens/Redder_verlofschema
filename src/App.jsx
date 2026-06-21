@@ -148,7 +148,7 @@ export default function App() {
     };
 
     try {
-      const res = await fetch("http://localhost:8000/schedule", {
+      const res = await fetch("/api/schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -294,7 +294,7 @@ export default function App() {
                 <div className="cell name">{person}</div>
 
                 {values.map((v, i) => (
-                  <div key={i} className={"cell " + (v === 1 ? "work" : "off")}>
+                  <div key={i} className={"cell " + (v === 0 ? "work" : "off")}>
                     {v === 0? "Work" : "Off"}
                   </div>
                 ))}
