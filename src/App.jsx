@@ -97,7 +97,8 @@ export default function App() {
       prefs: Object.fromEntries(people.map((p) => [p.name, buildPrefs(p.prefs)])),
     };
     try {
-      const res = await fetch("/api/schedule", {
+      const base = window.location.origin;
+      const res = await fetch(`${base}/api/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
