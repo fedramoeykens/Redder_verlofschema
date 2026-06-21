@@ -57,7 +57,8 @@ class ScheduleMaker:
 
         # ── PIPELINE ─────────────────────────────
         self.apply_forced_days()
-        self.apply_fixed_holidays()
+        if self.fixedh:
+            self.apply_fixed_holidays()
         print("\n── fixed holidays summary ──")
 
         print(self.schedule)
