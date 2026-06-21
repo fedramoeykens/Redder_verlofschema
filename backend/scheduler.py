@@ -738,7 +738,7 @@ class ScheduleMaker:
                     self.get_ab_combined_priority(p, d_idx), # 2. A/B Combined Priority
                     # SUBTRACT Urgency: If urgency is 10000, holiday score becomes -10000
                     self.get_priority_score(p, d_idx),      # 2. Your Streak Points (2nd holiday, etc)
-                    -self.people.index(p)                    # 4. Rank Tie-breaker
+                    self.people.index(p)                    # 4. Rank Tie-breaker
                 ), reverse=True)
                 print('d_idx,candidates',d_idx,candidates)
 
