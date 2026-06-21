@@ -140,7 +140,7 @@ export default function App() {
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
           <LegendItem color="#FAEEDA" border="#FAC775" textColor="#633806" label="Zondag" />
           <LegendItem color="#378ADD" textColor="#fff" label="Verplichte werkdag (klik)" />
-          <LegendItem color="#7F77DD" textColor="#fff" label="Feestdag (rechts klik)" />
+          <LegendItem color="#7F77DD" textColor="#fff" label="Feestdag (dubbel klik)" />
         </div>
         <div style={s.calendar}>
           {DOW.map((d) => <div key={d} style={s.dayHeader}>{d}</div>)}
@@ -161,7 +161,7 @@ export default function App() {
                 key={dn}
                 style={{ ...s.dayCell, background: bg, color, border }}
                 onClick={() => toggleForced(d)}
-                onContextMenu={(e) => { e.preventDefault(); toggleHoliday(d); }}
+                onDoubleClick={(e) => { e.preventDefault(); toggleHoliday(d); }}
               >
                 {dn}
               </div>
@@ -285,7 +285,7 @@ function PersonBlock({ person, pi, days, forced, holidays, onTargetChange, onPre
         </div>
       </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
-        {[["#1D9E75", "Hoge voorkeur"], ["#EF9F27", "Middel"], ["#E24B4A", "Liever niet"]].map(([color, label]) => (
+        {[["#1D9E75", "Hoge voorkeur"], ["#EF9F27", "Middel"], ["#E24B4A", "Lage voorkeur"]].map(([color, label]) => (
           <div key={label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--color-text-secondary)" }}>
             <div style={{ width: 10, height: 10, borderRadius: 3, background: color }} />{label}
           </div>
