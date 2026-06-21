@@ -86,32 +86,33 @@ export default function App() {
   };
 
   const generate = async () => {
-    setError("");
-    setResult(null);
-    const payload = {
-      start, end, forced,
-      fixed_holidays: holidays,
-      sun_quotas: Object.fromEntries(people.map((p) => [p.name, p.sundayQuota])),
-      fixed_holiday_quotas: Object.fromEntries(people.map((p) => [p.name, p.holidayQuota])),
-      targets: Object.fromEntries(people.map((p) => [p.name, p.target])),
-      prefs: Object.fromEntries(people.map((p) => [p.name, buildPrefs(p.prefs)])),
-    };
-    try {
-      const base = window.location.origin;
-      const res = await fetch(`${base}/api/schedule`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.detail ? JSON.stringify(data.detail) : "Fout bij genereren.");
-        return;
-      }
-      setResult(data.schedule);
-    } catch (e) {
-      setError("Kan de server niet bereiken — is die actief?");
+  setError("");
+  setResult(null);
+  const payload = {
+    start, end, forced,
+    fixed_holidays: holidays,
+    sun_quotas: Object.fromEntries(people.map((p) => [p.name, p.sundayQuota])),
+    fixed_holiday_quotas: Object.fromEntries(people.map((p) => [p.name, p.holidayQuota])),
+    targets: Object.fromEntries(people.map((p) => [p.name, p.target])),
+    prefs: Object.fromEntries(people.map((p) => [p.name, buildPrefs(p.prefs)])),
+  };
+  const base = window.location.origin;
+  const url = `${base}/api/schedule`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.detail ? JSON.stringify(data.detail) : "Fout bij genereren.");
+      return;
     }
+    setResult(data.schedule);
+  } catch (e) {
+    setError(`FOUT: ${e.name}: ${e.message} — URL: ${url}`);
+  }
   };
 
   const firstDow = days.length ? days[0].getDay() : 0;
