@@ -53,6 +53,5 @@ def create(req: Request):
         req.fixed_holiday_quotas,
     )
 
-    return {s
-        "table": maker.to_dataframe().to_dict(orient="records")
+    return {"table": maker.to_dataframe().to_dict(orient="records")
     }
