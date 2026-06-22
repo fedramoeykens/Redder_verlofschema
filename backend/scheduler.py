@@ -233,6 +233,8 @@ class ScheduleMaker:
                 else:
                   candidates = sorted(self.people , key=lambda p: (
                     self._needs_holiday_today(p, d_idx),
+                    self.rank_preferences_for_day(p,d_idx), # 2. Your Streak Points (2nd holiday, etc)
+
 
                       self.get_priority_score(p, d_idx )                # 4. WANTS HOLIDAY SCORE
                   ), reverse=True)
@@ -298,6 +300,7 @@ class ScheduleMaker:
                       else:
                         candidates = sorted(self.people , key=lambda p: (
                           self._needs_holiday_today(p, d_idx),
+                          self.rank_preferences_for_day(p,d_idx), # 2. Your Streak Points (2nd holiday, etc)
 
                             self.get_priority_score(p, d_idx, )                # 4. Rank Tie-breaker
                         ), reverse=True)
@@ -986,7 +989,10 @@ class ScheduleMaker:
                           key=lambda p: (
                               self._needs_holiday_today(p, d_idx),
                               self.get_work_balance_score(p, d_idx),
-                              self.get_priority_score(p, d_idx),
+                              
+                              self.rank_preferences_for_day(p,d_idx),
+                              self.get_priority_score(p, d_idx),# 2. Your Streak Points (2nd holiday, etc)
+
                           ), reverse=True
                       )
                       if ab_holiday and self.schedule[ab_holiday[0]][d_idx] != 0:
@@ -1014,11 +1020,7 @@ class ScheduleMaker:
                   self.rank_preferences_for_day(p,d_idx), # 2. Your Streak Points (2nd holiday, etc)
                   self.people.index(p)                    # 4. Rank Tie-breaker
                 ), reverse=True)
-                print('d_idx,candidates',d_idx,candidates)
-
-
-
-
+                
 
 
 
@@ -1337,6 +1339,7 @@ class ScheduleMaker:
 
         off_streak_t = off_streak_a + off_streak
         work_streak_t = work_streak_a + work_streak
+        
         if work_streak_t ==4 and off_streak_n ==4: return 1000 +diff
         if off_streak_t ==3 and work_streak_n ==5: return 0
         if off_streak_t == 4: return 0
@@ -1347,7 +1350,7 @@ class ScheduleMaker:
         
         
         if off_streak_a >0 and off_streak >0 and off_streak_t ==3: return 500  +diff
-        if work_streak_t == 3 and work_streak_a in [3,0]: return 450  +diff
+        
         if off_streak_t == 2: return 400 +diff
         if work_streak ==2 and work_streak_t == 4: return 375+diff
 
@@ -1357,8 +1360,11 @@ class ScheduleMaker:
 
         if work_streak_t == 2 and work_streak_a ==1: return 0
         if work_streak_t == 2: return 200 + diff
-        if work_streak_t ==3 and work_streak_a in [2,1]: return 100 + diff
+        
         if work_streak_t == 1: return 50 + diff
+        if work_streak_t == 3 and work_streak_a in [3,0]: return 450  +diff
+        if work_streak_t == 3 and work_streak_a==3: return 450 + diff
+        if work_streak_t ==3 and work_streak_a in [2,1]: return 100 + diff
         return 0
 
 
