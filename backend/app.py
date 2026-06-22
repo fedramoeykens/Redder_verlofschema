@@ -41,6 +41,7 @@ import pandas as pd  # ← add this at the top
 
 @app.post("/api/schedule")
 def create(req: Request):
+    maker = ScheduleMaker()
     maker.generate(        # ← generate returns (schedule, num_days)
         req.start,         #   but you don't need to capture it since
         req.end,           #   maker stores state internally
@@ -52,6 +53,6 @@ def create(req: Request):
         req.fixed_holiday_quotas,
     )
 
-    return {
+    return {s
         "table": maker.to_dataframe().to_dict(orient="records")
     }
