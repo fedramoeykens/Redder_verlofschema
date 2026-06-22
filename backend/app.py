@@ -1,9 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict, List, Any
 from scheduler import ScheduleMaker
 import numpy as np
+import pandas as pd
+import os
 
 app = FastAPI()
 
@@ -13,8 +17,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-maker = ScheduleMaker()
 
 @app.get("/api/health")
 def root():
@@ -37,14 +39,13 @@ def clean_schedule(final_sched):
             v = v.tolist()
         cleaned[k] = [int(x) for x in v]
     return cleaned
-import pandas as pd  # ← add this at the top
 
 @app.post("/api/schedule")
 def create(req: Request):
     maker = ScheduleMaker()
-    maker.generate(        # ← generate returns (schedule, num_days)
-        req.start,         #   but you don't need to capture it since
-        req.end,           #   maker stores state internally
+    maker.generate(
+        req.start,
+        req.end,
         req.forced,
         req.sun_quotas,
         req.prefs,
@@ -52,6 +53,12 @@ def create(req: Request):
         req.fixed_holidays,
         req.fixed_holiday_quotas,
     )
+    return {"table": maker.to_dataframe().to_dict(orient="records")}
 
-    return {"table": maker.to_dataframe().to_dict(orient="records")
-    }
+# ── Serve React frontend ────────────────────────────────
+if os.path.exists("dist"):
+    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    def serve_spa(full_path: str):
+        return FileResponse("dist/index.html")
