@@ -1344,7 +1344,7 @@ class ScheduleMaker:
         
         if off_streak_t == 1: return 600 +diff
         if work_streak_a ==4 or work_streak ==4: return 800  +diff
-        -
+        
         
         if off_streak_a >0 and off_streak >0 and off_streak_t ==3: return 500  +diff
         if work_streak_t == 3 and work_streak_a in [3,0]: return 450  +diff
