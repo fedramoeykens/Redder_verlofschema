@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 const NAMES = ["a", "b", "c", "d", "e", "f", "g"];
 const CLICK_MS = 380;
 const PREF_LEVELS = { 1: "high", 2: "mid", 3: "low" };
-const DOW = ["Zo", "Ma", "Di", "Wo", "Do", "Vr", "Za"];
+const DOW = [ "Ma", "Di", "Wo", "Do", "Vr", "Za","Zo"];
 
 function getDays(start, end) {
   const list = [];
@@ -238,7 +238,7 @@ export default function App() {
     <div style={s.app}>
       {/* TITLE */}
       <h1 style={s.title}>Verlofschema Knokke</h1>
-      <p style={s.sub}>Plan en beheer de werkroosters voor het strandteam</p>
+      <p style={s.sub}>Plan de werkroosters voor je post</p>
 
       {/* PERIOD */}
       <div style={s.section}>
@@ -256,8 +256,8 @@ export default function App() {
         <div style={s.sectionLabel}>Globale kalender</div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
           <LegendItem color="#FAEEDA" border="0.5px solid #FAC775" textColor="#633806" label="Zondag" />
-          <LegendItem color="#378ADD" textColor="#fff" label="Verplichte werkdag (klik)" />
-          <LegendItem color="#7F77DD" textColor="#fff" label="Feestdag (dubbel klik)" />
+          <LegendItem color="#24a4e9" textColor="#fff" label="Verplichte werkdag (klik)" />
+          <LegendItem color="#cf44d8" textColor="#fff" label="Feestdag (dubbel klik)" />
         </div>
         <div style={s.calendar}>
           {DOW.map((d) => <div key={d} style={s.dayHeader}>{d}</div>)}
