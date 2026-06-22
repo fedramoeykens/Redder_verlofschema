@@ -37,12 +37,21 @@ def clean_schedule(final_sched):
             v = v.tolist()
         cleaned[k] = [int(x) for x in v]
     return cleaned
+import pandas as pd  # ← add this at the top
 
 @app.post("/api/schedule")
 def create(req: Request):
-    final_sched, d_count = maker.generate(
-        req.start, req.end, req.forced,
-        req.sun_quotas, req.prefs, req.targets,
-        req.fixed_holidays, req.fixed_holiday_quotas
+    maker.generate(        # ← generate returns (schedule, num_days)
+        req.start,         #   but you don't need to capture it since
+        req.end,           #   maker stores state internally
+        req.forced,
+        req.sun_quotas,
+        req.prefs,
+        req.targets,
+        req.fixed_holidays,
+        req.fixed_holiday_quotas,
     )
-    return {"schedule": clean_schedule(final_sched), "counts": d_count}
+
+    return {
+        "table": maker.to_dataframe().to_dict(orient="records")
+    }

@@ -24,6 +24,106 @@ function buildPrefs(prefs) {
   return out;
 }
 
+function LegendItem({ color, border, textColor, label }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--color-text-secondary)" }}>
+      <div style={{ width: 12, height: 12, borderRadius: 3, background: color, border: border || "none" }} />
+      {label}
+    </div>
+  );
+}
+
+function QuotaGroup({ label, people, field, onChange }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {people.map((p, i) => (
+          <div key={p.name} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <label style={{ fontSize: 11, color: "var(--color-text-secondary)", fontWeight: 500 }}>{p.name}</label>
+            <input
+              type="number"
+              min="0"
+              value={p[field]}
+              onChange={(e) => onChange(i, +e.target.value)}
+              style={{ width: 54, fontSize: 13 }}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PersonBlock({ person, pi, days, forced, holidays, onTargetChange, onPrefClick }) {
+  const initials = person.name.substring(0, 2).toUpperCase();
+  const firstDow = days.length ? days[0].getDay() : 0;
+  return (
+    <div style={s.personBlock}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <div style={s.avatar}>{initials}</div>
+        <div style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)" }}>
+          Redder {person.name.toUpperCase()}
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 11, color: "var(--color-text-secondary)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Doeltal
+          </label>
+          <input
+            type="number"
+            value={person.target}
+            onChange={(e) => onTargetChange(+e.target.value)}
+            style={{ width: 60, fontSize: 13 }}
+          />
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
+        {[["#1D9E75", "Hoge voorkeur"], ["#EF9F27", "Middel"], ["#E24B4A", "Lage voorkeur"]].map(([color, label]) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--color-text-secondary)" }}>
+            <div style={{ width: 10, height: 10, borderRadius: 3, background: color }} />
+            {label}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 8 }}>
+        Klik 1× = hoog · 2× = midden · 3× = laag · nog eens = wissen
+      </div>
+      <div style={s.smallCal}>
+        {DOW.map((d) => <div key={d} style={s.dayHeader}>{d}</div>)}
+        {Array.from({ length: firstDow }).map((_, i) => <div key={`e-${i}`} />)}
+        {days.map((d) => {
+          const dn = d.getDate();
+          const isSun = d.getDay() === 0;
+          const isForced = forced.includes(dn);
+          const isHol = holidays.includes(dn);
+          const pref = person.prefs[dn];
+          let bg = "var(--color-background-secondary)";
+          let color = "var(--color-text-primary)";
+          let border = "0.5px solid var(--color-border-tertiary)";
+          let borderBottom = border;
+          if (isSun) { bg = "#FAEEDA"; color = "#633806"; }
+          if (isForced) borderBottom = "2.5px solid #378ADD";
+          if (isHol) borderBottom = "2.5px solid #7F77DD";
+          if (pref === "high") { bg = "#1D9E75"; color = "#fff"; border = "0.5px solid #0F6E56"; borderBottom = border; }
+          if (pref === "mid") { bg = "#EF9F27"; color = "#fff"; border = "0.5px solid #BA7517"; borderBottom = border; }
+          if (pref === "low") { bg = "#E24B4A"; color = "#fff"; border = "0.5px solid #A32D2D"; borderBottom = border; }
+          return (
+            <div
+              key={dn}
+              style={{ ...s.smallDay, background: bg, color, border, borderBottom }}
+              onClick={() => onPrefClick(d)}
+            >
+              {dn}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [start, setStart] = useState("2026-07-01");
   const [end, setEnd] = useState("2026-07-31");
@@ -35,6 +135,7 @@ export default function App() {
   );
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const clickState = useRef({});
 
   useEffect(() => {
@@ -43,6 +144,7 @@ export default function App() {
 
   const sunCount = days.filter((d) => d.getDay() === 0 && !holidays.includes(d.getDate())).length;
   const holCount = holidays.length;
+  const firstDow = days.length ? days[0].getDay() : 0;
 
   const toggleForced = (d) => {
     const dn = d.getDate();
@@ -86,36 +188,51 @@ export default function App() {
   };
 
   const generate = async () => {
-  setError("");
-  setResult(null);
-  const payload = {
-    start, end, forced,
-    fixed_holidays: holidays,
-    sun_quotas: Object.fromEntries(people.map((p) => [p.name, p.sundayQuota])),
-    fixed_holiday_quotas: Object.fromEntries(people.map((p) => [p.name, p.holidayQuota])),
-    targets: Object.fromEntries(people.map((p) => [p.name, p.target])),
-    prefs: Object.fromEntries(people.map((p) => [p.name, buildPrefs(p.prefs)])),
-  };
-  const base = window.location.origin;
-  const url = `${base}/api/schedule`;
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.detail ? JSON.stringify(data.detail) : "Fout bij genereren.");
-      return;
-    }
-    setResult(data.schedule);
-  } catch (e) {
-    setError(`FOUT: ${e.name}: ${e.message} — URL: ${url}`);
-  }
-  };
+    setError("");
+    setResult(null);
+    setLoading(true);
+    const payload = {
+      start,
+      end,
+      forced,
+      fixed_holidays: holidays,
+      sun_quotas: Object.fromEntries(people.map((p) => [p.name, p.sundayQuota])),
+      fixed_holiday_quotas: Object.fromEntries(people.map((p) => [p.name, p.holidayQuota])),
+      targets: Object.fromEntries(people.map((p) => [p.name, p.target])),
+      prefs: Object.fromEntries(people.map((p) => [p.name, buildPrefs(p.prefs)])),
+    };
+    const base = window.location.origin;
+    const url = `${base}/api/schedule`;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-  const firstDow = days.length ? days[0].getDay() : 0;
+      const text = await res.text();  // always read as text first
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // backend returned plain text (e.g. a 500 HTML/text page)
+        setError(`Server fout (${res.status}): ${text.slice(0, 300)}`);
+        return;
+      }
+
+      if (!res.ok) {
+        setError(data.detail ? JSON.stringify(data.detail) : `Fout ${res.status}: ${JSON.stringify(data)}`);
+        return;
+      }
+
+      setResult(data.table);
+    } catch (err) {
+      setError("Netwerkfout: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div style={s.app}>
@@ -138,7 +255,7 @@ export default function App() {
       <div style={s.section}>
         <div style={s.sectionLabel}>Globale kalender</div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
-          <LegendItem color="#FAEEDA" border="#FAC775" textColor="#633806" label="Zondag" />
+          <LegendItem color="#FAEEDA" border="0.5px solid #FAC775" textColor="#633806" label="Zondag" />
           <LegendItem color="#378ADD" textColor="#fff" label="Verplichte werkdag (klik)" />
           <LegendItem color="#7F77DD" textColor="#fff" label="Feestdag (dubbel klik)" />
         </div>
@@ -180,8 +297,18 @@ export default function App() {
             Er zijn <strong>{holCount} feestdag{holCount !== 1 ? "en" : ""}</strong> — verdeel deze eveneens.
           </p>
           <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginTop: 12 }}>
-            <QuotaGroup label="Zondagquota per redder" people={people} field="sundayQuota" onChange={(i, v) => updatePerson(i, "sundayQuota", v)} />
-            <QuotaGroup label="Feestdagquota per redder" people={people} field="holidayQuota" onChange={(i, v) => updatePerson(i, "holidayQuota", v)} />
+            <QuotaGroup
+              label="Zondagquota per redder"
+              people={people}
+              field="sundayQuota"
+              onChange={(i, v) => updatePerson(i, "sundayQuota", v)}
+            />
+            <QuotaGroup
+              label="Feestdagquota per redder"
+              people={people}
+              field="holidayQuota"
+              onChange={(i, v) => updatePerson(i, "holidayQuota", v)}
+            />
           </div>
         </div>
       </div>
@@ -208,7 +335,9 @@ export default function App() {
       </div>
 
       {/* GENERATE */}
-      <button style={s.genBtn} onClick={generate}>Schema genereren</button>
+      <button style={s.genBtn} onClick={generate} disabled={loading}>
+        {loading ? "Bezig met genereren…" : "Schema genereren"}
+      </button>
 
       {error && <div style={s.error}>{error}</div>}
 
@@ -220,110 +349,36 @@ export default function App() {
             <table style={s.table}>
               <thead>
                 <tr>
-                  <th style={s.th}>Redder</th>
-                  {Object.values(result)[0].map((_, i) => (
-                    <th key={i} style={s.th}>{i + 1}</th>
+                  {Object.keys(result[0]).map((col) => (
+                    <th key={col} style={s.th}>{col}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(result).map(([person, vals]) => (
-                  <tr key={person}>
-                    <td style={{ ...s.td, fontWeight: 500, textAlign: "left", padding: "5px 10px" }}>{person}</td>
-                    {vals.map((v, i) => (
-                      <td key={i} style={{ ...s.td, background: v === 0 ? "#EAF3DE" : "var(--color-background-secondary)", color: v === 0 ? "#27500A" : "var(--color-text-tertiary)", fontWeight: v === 0 ? 500 : 400 }}>
-                        {v === 0 ? "W" : "—"}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+                {result.map((row, rowIndex) => {
+                  const isWorkRow = row.Date === "Gewerkte dagen";
+                  const isSundayRow = row.Date === "Gewerkte zondagen";
+                  const isHolidayRow = row.Date === "Gewerkte feestdagen";
+                  return (
+                    <tr key={rowIndex}>
+                      {Object.entries(row).map(([key, value], colIndex) => {
+                        let style = { ...s.td };
+                        if (key === "Date") { style = { ...style, textAlign: "left", fontWeight: 600 }; }
+                        else if (value === "WORK") { style = { ...style, background: "#EAF3DE", color: "#27500A", fontWeight: 500 }; }
+                        else if (value === "OFF") { style = { ...style, background: "var(--color-background-secondary)", color: "var(--color-text-tertiary)" }; }
+                        if (isWorkRow) { style = { ...style, fontWeight: 700 }; }
+                        if (isSundayRow) { style = { ...style, color: "#1976d2", fontWeight: 700 }; }
+                        if (isHolidayRow) { style = { ...style, color: "#2e7d32", fontWeight: 700 }; }
+                        return <td key={colIndex} style={style}>{value}</td>;
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function LegendItem({ color, border, textColor, label }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--color-text-secondary)" }}>
-      <div style={{ width: 12, height: 12, borderRadius: 3, background: color, border: border || "none" }} />
-      {label}
-    </div>
-  );
-}
-
-function QuotaGroup({ label, people, field, onChange }) {
-  return (
-    <div>
-      <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{label}</div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {people.map((p, i) => (
-          <div key={p.name} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <label style={{ fontSize: 11, color: "var(--color-text-secondary)", fontWeight: 500 }}>{p.name}</label>
-            <input type="number" min="0" value={p[field]} onChange={(e) => onChange(i, +e.target.value)} style={{ width: 54, fontSize: 13 }} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PersonBlock({ person, pi, days, forced, holidays, onTargetChange, onPrefClick }) {
-  const initials = person.name.substring(0, 2).toUpperCase();
-  const firstDow = days.length ? days[0].getDay() : 0;
-  return (
-    <div style={s.personBlock}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <div style={s.avatar}>{initials}</div>
-        <div style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)" }}>Redder {person.name.toUpperCase()}</div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-          <label style={{ fontSize: 11, color: "var(--color-text-secondary)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>Doeltal</label>
-          <input type="number" value={person.target} onChange={(e) => onTargetChange(+e.target.value)} style={{ width: 60, fontSize: 13 }} />
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
-        {[["#1D9E75", "Hoge voorkeur"], ["#EF9F27", "Middel"], ["#E24B4A", "Lage voorkeur"]].map(([color, label]) => (
-          <div key={label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--color-text-secondary)" }}>
-            <div style={{ width: 10, height: 10, borderRadius: 3, background: color }} />{label}
-          </div>
-        ))}
-      </div>
-      <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 8 }}>
-        Klik 1× = hoog · 2× = midden · 3× = laag · nog eens = wissen
-      </div>
-      <div style={s.smallCal}>
-        {DOW.map((d) => <div key={d} style={s.dayHeader}>{d}</div>)}
-        {Array.from({ length: firstDow }).map((_, i) => <div key={`e-${i}`} />)}
-        {days.map((d) => {
-          const dn = d.getDate();
-          const isSun = d.getDay() === 0;
-          const isForced = forced.includes(dn);
-          const isHol = holidays.includes(dn);
-          const pref = person.prefs[dn];
-          let bg = "var(--color-background-secondary)";
-          let color = "var(--color-text-primary)";
-          let border = "0.5px solid var(--color-border-tertiary)";
-          let borderBottom = border;
-          if (isSun) { bg = "#FAEEDA"; color = "#633806"; }
-          if (isForced) borderBottom = "2.5px solid #378ADD";
-          if (isHol) borderBottom = "2.5px solid #7F77DD";
-          if (pref === "high") { bg = "#1D9E75"; color = "#fff"; border = "0.5px solid #0F6E56"; borderBottom = border; }
-          if (pref === "mid") { bg = "#EF9F27"; color = "#fff"; border = "0.5px solid #BA7517"; borderBottom = border; }
-          if (pref === "low") { bg = "#E24B4A"; color = "#fff"; border = "0.5px solid #A32D2D"; borderBottom = border; }
-          return (
-            <div
-              key={dn}
-              style={{ ...s.smallDay, background: bg, color, border, borderBottom }}
-              onClick={() => onPrefClick(d)}
-            >
-              {dn}
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
