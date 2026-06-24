@@ -13,7 +13,7 @@ class ScheduleMaker:
     # CORE ENTRY POINT
     # ─────────────────────────────────────────────
     def generate(self, start_date, end_date, forced_days,
-                 sunday_quotas, prefs, targets, fixed_holidays,fixed_holidays_quotas):
+                 sunday_quotas, prefs, targets, fixed_holidays,fixed_holidays_quotas,zeezwemmen=[5,6]):
 
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -48,7 +48,7 @@ class ScheduleMaker:
         self.fixed_holidays = fixed_holidays
 
         self.schedule = {p: [2] * self.num_days for p in self.people}
-
+        self.zeezwemmen = zeezwemmen
         # Sundays
         self.sundays = [
             i + 1
@@ -58,19 +58,64 @@ class ScheduleMaker:
 
         # ── PIPELINE ─────────────────────────────
         self.apply_forced_days()
-        self.apply_fixed_holidays()
+        
         print("\n── fixed holidays summary ──")
 
         print(self.schedule)
         self.apply_preference_pass()
+        self.apply_fixed_holidays()
         self.fill_sundays()
+        self.fill_mandatory()
+        print("\n── mandatory summary ──")
+        print(self.schedule )
         self.balance_regular_days()
+        print(self.schedule)
+        
 
         return self.schedule, self.num_days
 
     # ─────────────────────────────────────────────
     # PASS 1
     # ─────────────────────────────────────────────
+    def fill_mandatory(self):
+        for d_idx in range(self.num_days):
+            day_num = d_idx + 1
+            if day_num in self.forced_days or day_num in self.sundays or day_num in self.fixed_holidays:
+                continue
+                
+            must_work_list = []
+            must_holiday_list = []
+            
+            for p in self.people:
+                if self.schedule[p][d_idx]:  # already assigned, skip
+                    if self.schedule[p][d_idx] == 1:
+                        must_holiday_list.append(p)
+                    else:
+                        must_work_list.append(p)
+                
+                if self.must_work(p, d_idx):
+                    must_work_list.append(p)
+                    self.schedule[p][d_idx] = 0
+                    
+                elif self._needs_holiday(p, d_idx):
+                    must_holiday_list.append(p)
+                    self.schedule[p][d_idx] = 1
+
+            # if 3+ must work -> all remaining unassigned also work
+            if len(must_work_list) == 4:
+                for p in [p for p in self.people if p not in must_work_list]:
+                    if self.schedule[p][d_idx] == 2:
+                        self.schedule[p][d_idx] = 1
+
+            # if 3+ must holiday -> all remaining unassigned also holiday
+            # but respect coverage minimum of 4 workers
+            if len(must_holiday_list) == 3:
+                for p in [p for p in self.people if p not in must_holiday_list]:
+                    if self.schedule[p][d_idx] == 2:
+                        self.schedule[p][d_idx] = 0
+
+
+
     def number_working_4_in_a_row(self,d_idx):
         working_4 = {}
         for p in self.people:
@@ -178,11 +223,39 @@ class ScheduleMaker:
                                       break
                             return False
 
-                else:
+                elif next_day_num in self.fixed_holidays:  
                     if next_idx < self.num_days:
-                      # Next day is a regular day → just force work
-                      self.schedule[p][next_idx] = 0
-                      return False
+                          # 1-based
+                        
+                        
+                        # Next day is a Sunday
+                        holidays_worked = sum(1 for s in self.fixed_holidays if self.schedule[p][s-1] == 0)
+                        holidays_debt = self.fixed_holidays_quotas[p] - holidays_worked
+                        holidays_remaining = sum(1 for s in self.fixed_holidays if self.schedule[p][s-1] == 2)
+                        if holidays_debt >= holidays_remaining:
+                            # Still have Sunday work quota to fill → work on Sunday
+                            self.schedule[p][next_idx] = 0
+                            
+                        else:
+                            # No Sunday debt left → work TODAY instead, give off on Sunday
+                            self.schedule[p][d_idx] = 0    # undo today's holiday
+                            self.schedule[p][next_idx] = 1  # give off on Sunday instead
+                            
+                            # Give today's holiday to someone else who needs it most
+                            # Prioritise people who had today as a preference
+                            if not any(self.schedule[other][d_idx] == 2 for other in self.people if other != p):
+                              for other in self.people:
+                                  if other != p and self.schedule[other][d_idx] == 0 and self._can_take_holiday(other, d_idx):
+                                      self.schedule[other][d_idx] = 2
+                                      print(f"  STREAK BREAKER: reset {other} to unset (day {d_idx+1})")
+                                      break
+                            return False
+
+                    else:
+                        if next_idx < self.num_days:
+                        # Next day is a regular day → just force work
+                          self.schedule[p][next_idx] = 0
+                          return False
 
                 
 
@@ -216,6 +289,30 @@ class ScheduleMaker:
                                       print(f"  STREAK BREAKER: reset {other} to unset (day {d_idx+1})")
                                       break
                             return False 
+                    if last_day_num in self.fixed_holidays:
+                      # Next day is a Sunday
+                      holidays_worked = sum(1 for s in self.holidays if self.schedule[p][s-1] == 0)
+                      
+                      holidays_remaining= sum(1 for s in self.holidays if self.schedule[p][s-1] == 2)
+                      holidays_debt = self.holidays_quotas[p] - holidays_worked
+                      if holidays_debt >= holidays_remaining and (self.schedule[p][last_idx] == 2):
+                          # Still have Sunday work quota to fill → work on Sunday
+                          self.schedule[p][last_idx] = 0
+                          
+                      else:
+                          # No Sunday debt left → work TODAY instead, give off on Sunday
+                          self.schedule[p][d_idx] = 0    # undo today's holiday
+                          self.schedule[p][last_idx] = 1  # give off on Sunday instead
+                          
+                          # Give today's holiday to someone else who needs it most
+                          # Prioritise people who had today as a preference
+                          if not any(self.schedule[other][d_idx] == 2 for other in self.people if other != p):
+                            for other in self.people:
+                                if other != p and self.schedule[other][d_idx] == 0 and self._can_take_holiday(other, d_idx):
+                                    self.schedule[other][d_idx] = 2
+                                    print(f"  STREAK BREAKER: reset {other} to unset (day {d_idx+1})")
+                                    break
+                          return False 
 
                     
             
@@ -232,7 +329,7 @@ class ScheduleMaker:
                   pass
                 else:
                   candidates = sorted(self.people , key=lambda p: (
-                    self._needs_holiday_today(p, d_idx),
+                    self._needs_holiday(p, d_idx),
                     self.rank_preferences_for_day(p,d_idx), # 2. Your Streak Points (2nd holiday, etc)
 
 
@@ -299,7 +396,7 @@ class ScheduleMaker:
                         pass
                       else:
                         candidates = sorted(self.people , key=lambda p: (
-                          self._needs_holiday_today(p, d_idx),
+                          self._needs_holiday(p, d_idx),
                           self.rank_preferences_for_day(p,d_idx), # 2. Your Streak Points (2nd holiday, etc)
 
                             self.get_priority_score(p, d_idx, )                # 4. Rank Tie-breaker
@@ -317,6 +414,52 @@ class ScheduleMaker:
                                 self.schedule['a'][d_idx] = 0
                                 self.schedule['b'][d_idx] = 0
 
+            if (d_idx + 1) in self.fixed_holidays:
+                  get_workingcount = self.number_working_3_in_a_row(d_idx)
+                  get_workingcount_people = list(get_workingcount.keys())
+                  get_workingcount_people_length = len(get_workingcount_people)
+                  if ['a','b'] not in get_workingcount_people and self.get_ab_combined_priority!=0:
+                      get_workingcount_people_length +=1
+                      if get_workingcount_people is not None:
+                          get_workingcount_people.append('a')
+
+                      
+
+
+                  if get_workingcount_people_length>= 4:
+                      if p in get_workingcount_people:
+                        pass
+                      else:
+                        candidates1 = sorted(self.people , key=lambda p: (
+                          self._can_take_holiday(p,d_idx),
+                          self._needs_holiday(p, d_idx),
+                          self.rank_preferences_for_day(p,d_idx), # 2. Your Streak Points (2nd holiday, etc)
+
+                            self.get_priority_score(p, d_idx, )                # 4. Rank Tie-breaker
+                        ), reverse=True)
+                        candidates = candidates1.copy()
+                        remove = ['a','b',p]
+                        for x in remove:
+                            if x in candidates:
+                              candidates.remove(x)
+                        print(candidates,'candidates')
+                        p_new = candidates[0]
+                        if self.get_ab_combined_priority('a', d_idx) ==0 :
+                                self.schedule['a'][d_idx] = 0
+                                self.schedule['b'][d_idx] = 0
+                                self.schedule[p_new][d_idx] = 1
+                                return False
+
+                        else:
+                            if 'a' in candidates1:
+                              p_new = 'b'
+                            if 'b' in candidates1:
+                              p_new = 'a'
+
+                            self.schedule[p_new][d_idx] = 1
+                            return False
+
+
 
 
 
@@ -331,23 +474,29 @@ class ScheduleMaker:
               
               needs_holiday_sum = 0
               for other in self.people:
-                if self._needs_holiday_today(other,d_idx) == True:
+                if self._needs_holiday(other,d_idx) == True:
                     if other not in ['a','b',p]:
                       needs_holiday_sum +=1
 
               if needs_holiday_sum >= 1:
                 if self.get_ab_combined_priority('a',d_idx) >0:
                   self.schedule[p][d_idx] = 0
+                  for p in self.people:
+                    if p not in ['a','b'] and self.schedule[p][d_idx]==2:
+                      self.schedule[p][d_idx] = 0
                   return False
                   print('could not get holiday due to priority')
                 else:
                   if needs_holiday_sum ==1:
-                    if self._needs_holiday_today('a',d_idx) == False and self._needs_holiday_today('b',d_idx)==False:
+                    if self._needs_holiday('a',d_idx) == False and self._needs_holiday('b',d_idx)==False:
                       self.schedule['a'][d_idx] = 0
                       self.schedule['b'][d_idx] = 0
                     else:
                       print('could not get holiday due to needing holiday for A/B')
                       self.schedule[p][d_idx] =0
+                      for p in self.people:
+                        if p not in ['a','b'] and self.schedule[p][d_idx]==2:
+                          self.schedule[p][d_idx] = 0
                       return False
 
 
@@ -356,7 +505,7 @@ class ScheduleMaker:
 
               needs_holiday_sum = 0
               for other in self.people:
-                if self._needs_holiday_today(other,d_idx) == True:
+                if self._needs_holiday(other,d_idx) == True:
                     if other not in ['a','b',p]:
                       needs_holiday_sum +=1
 
@@ -371,7 +520,7 @@ class ScheduleMaker:
                     print('could not get holiday due to priority')
                 else:
                     if needs_holiday_sum ==2:
-                      if self._needs_holiday_today('a',d_idx) == False and self._needs_holiday_today('b',d_idx)==False and not ((self.schedule['a'] or self.schedule['b']) ==1) :
+                      if self._needs_holiday('a',d_idx) == False and self._needs_holiday('b',d_idx)==False and not ((self.schedule['a'] or self.schedule['b']) ==1) :
                         self.schedule['a'][d_idx] = 0
                         self.schedule['b'][d_idx] = 0
                         print('can get holiday, a and b take over')
@@ -392,7 +541,11 @@ class ScheduleMaker:
             print(f"  PREF HOLIDAY → {p} on day {d_idx+1}, schedule so far: {[self.schedule[q][d_idx] for q in self.people]}")
               # A/B constraint
 
-
+            if self.schedule[p][d_idx] == 1 :
+                if p == 'a':
+                    self.schedule['b'][d_idx]=0
+                if p == 'b':
+                    self.schedule['a'][d_idx]=0
 
             return True
 
@@ -493,12 +646,12 @@ class ScheduleMaker:
             assigned_workers = list(already_working)
             assigned_off     = list(already_off)
             workers_needed   = max(0, 4 - len(assigned_workers))
-            for worker in current_unset:
-                if self._needs_holiday_today(worker, d_idx):
-                    print('worker',worker, 'needs holiday today',d_idx,"sunday")
-                    self.schedule[worker][d_idx] = 1
-                    assigned_off.append(worker)
-                    current_unset.remove(worker)
+            for worker in list(current_unset):  # iterate over a copy
+              if self._needs_holiday(worker, d_idx):
+                  print('worker', worker, 'needs holiday today', d_idx, "sunday")
+                  self.schedule[worker][d_idx] = 1
+                  assigned_off.append(worker)
+                  current_unset.remove(worker) 
             # 1. ── MANDATORY FUTURE LOOK-AHEAD ──────────────────────────────────
             # If anyone's debt matches their remaining availability, they MUST work
             for p in list(current_unset):
@@ -583,7 +736,7 @@ class ScheduleMaker:
         for p in self.people:
                 if self.schedule[p][d_idx] == 2:
                     self.schedule[p][d_idx] = 1
-        print("Schedule after preference pass:")
+        print("Schedule after sundays pass:")
         for p in self.people:
             print(f"  {p}: {self.schedule[p]}")
     def apply_fixed_holidays(self):
@@ -821,8 +974,9 @@ class ScheduleMaker:
           return 2
       elif ((remaining_work_needed+confirmed_future_work)//5 + remaining_work_needed + 1) and (d_idx < self.num_days-6)>= available_days:
           return 2.5
-      elif ((remaining_work_needed+confirmed_future_work)//5 + remaining_work_needed + 2) and (d_idx < self.num_days-8)>= available_days:
-          return 2.8
+      
+      
+
       elif remaining_holidays_needed + (remaining_holidays_needed + confirmed_blocks)//4 >= available_days:
           return 5
       elif remaining_holidays_needed + (remaining_holidays_needed + confirmed_blocks)//4 +1 >= available_days and ((remaining_work_needed+confirmed_future_work)//5  + remaining_work_needed < self.num_days):
@@ -846,15 +1000,7 @@ class ScheduleMaker:
         # 2. TODAY'S IMPACT: If they both work today, that's +2 days
         today_impact = 2
 
-        # 3. FUTURE BURDEN: Mandatory days from tomorrow onwards
-        # We sum for both A and B
-        future_a = self.count_future_mandatory_work('a', d_idx)
-        future_b = self.count_future_mandatory_work('b', d_idx)
-
-        future_mandatory = future_a + future_b
-
-        # 4. THE TOTAL: Everything they've done + what they MUST do
-        projected_total = work_done + today_impact + future_mandatory
+        
         # If this total is higher than their combined budget,
         # the algorithm MUST prioritize giving one of them a holiday today.
         total_pairs = sum(
@@ -872,6 +1018,14 @@ class ScheduleMaker:
             or (self.schedule['a'][d] == 2 and self.schedule['b'][d] == 0)
             or (self.schedule['b'][d] == 2 and self.schedule['a'][d] == 0)
         )
+        total_empty= sum(
+            1 for d in range(self.num_days)
+            if (self.schedule['a'][d] == 2 and self.schedule['b'][d] == 2))
+
+        print(total_pairs,'total pairs')
+        print(total_alone,'total alone')
+        print(total_available,'total available')
+        print(combined_target,'combined target')
 
         for d in range(self.num_days):
             a_cell = self.schedule['a'][d]
@@ -886,27 +1040,59 @@ class ScheduleMaker:
                 total_pairs += 1  # contributes 2 work days
                 total_available -=1
             elif day_num in self.sundays:
-                # Count remaining available sundays from this point forward (including today)
-                a_sundays_avail = sum(1 for s in self.sundays if s-1 >= d and (self.schedule['a'][s-1] == 2 ))
-                b_sundays_avail = sum(1 for s in self.sundays if s-1 >= d and (self.schedule['b'][s-1] == 2 ))
+                # Only compute once per schedule (not per-day) — move this outside the loop
+                # But if computing incrementally, here's the logic:
                 
-                a_debt = max(0, self.sunday_quotas['a'] - sum(1 for s in self.sundays if (s-1) < d and self.schedule['a'][s-1] == 0))
-                b_debt = max(0, self.sunday_quotas['b'] - sum(1 for s in self.sundays if (s-1) < d and self.schedule['b'][s-1] == 0))
-
-                # If both debts fill all available sundays → they must work together on some
-                # Overlap = how many sundays BOTH must work = max(0, a_debt + b_debt - a_sundays_avail)
-                # (since they share the same pool of sundays)
-                forced_together = max(0, a_debt + b_debt - a_sundays_avail)
+                # What's already locked in (1=work, 0=off, 2=flexible)
+                if self.schedule['a'][day_num]==1:
+                    self.schedule['b'][day_num]=0
+                if self.schedule['b'][day_num]==1:
+                    self.schedule['a'][day_num]=0
                 
-                 # pair days
-                total_pairs += forced_together
-                total_available -= forced_together
+            elif day_num in self.fixed_holidays:
+                # Only compute once per schedule (not per-day) — move this outside the loop
+                # But if computing incrementally, here's the logic:
+                
+                # What's already locked in (1=work, 0=off, 2=flexible)
+                if self.schedule['a'][day_num]==1:
+                    self.schedule['b'][day_num]=0
+                if self.schedule['b'][day_num]==1:
+                    self.schedule['a'][day_num]=0
+                
+            else:
+                continue
+        a_worked = sum(1 for s in self.sundays if self.schedule['a'][s-1] == 0)
+        b_worked = sum(1 for s in self.sundays if self.schedule['b'][s-1] == 0)
+        
+        # Already counted pairs (both == 1)
+        already_pairs = sum(1 for s in self.sundays 
+                            if self.schedule['a'][s-1] == 0 and self.schedule['b'][s-1] == 0)
+        total_pairs_should =  self.sunday_quotas['a'] + self.sunday_quotas['b'] - len(self.sundays)
+        if already_pairs == total_pairs_should:
+            pass
+        
+        else:
+            total_pairs += total_pairs_should
+            total_available-=1
+            
 
-                # remaining debt after pair days filled
-                remaining_a = max(0, a_debt - forced_together)
-                remaining_b = max(0, b_debt - forced_together)
-                total_alone += remaining_a + remaining_b
-                total_available -= (remaining_a + remaining_b)
+
+        a_worked = sum(1 for s in self.fixed_holidays if self.schedule['a'][s-1] == 0)
+        b_worked = sum(1 for s in self.fixed_holidays if self.schedule['b'][s-1] == 0)
+        
+        # Already counted pairs (both == 1)
+        already_pairs = sum(1 for s in self.fixed_holidays 
+                            if self.schedule['a'][s-1] == 0 and self.schedule['b'][s-1] == 0)
+        total_pairs_should =  self.fixedh_quotas['a'] + self.fixedh_quotas['b'] - len(self.fixed_holidays)
+        if already_pairs == total_pairs_should:
+            pass
+        else:
+        
+
+            total_pairs += total_pairs_should
+            total_available-=1
+        
+                
                             
 
 
@@ -921,11 +1107,10 @@ class ScheduleMaker:
         print(total_alone,'total alone')
         print(total_available,'total available')
         print(combined_target,'combined target')
-
-        if projected_total < combined_target:
-            return 50000 + (projected_total - combined_target) * 1000
-        elif projected_total <= combined_target:
-            return 3000
+        if combined_target < total_available + total_pairs*2 +1 + total_alone:
+            return 50000
+        
+        
         else:
             return 0
 
@@ -971,7 +1156,8 @@ class ScheduleMaker:
             if d_idx in [28,29]:
                 print(non_ab_working,'non ab working')
 
-            if len(non_ab_working) == 2 and self.current_off(d_idx) ==2 :
+            if len(non_ab_working) == 2 and self.current_off(d_idx) ==3 :
+
               ab_needs_holiday = self._needs_holiday_today('a', d_idx) or self._needs_holiday_today('b', d_idx)
               if ab_needs_holiday or self.get_ab_combined_priority('a', d_idx) > 0:
                   # Force the non-ab person who doesn't need holiday and has lowest priority to work
@@ -1016,11 +1202,39 @@ class ScheduleMaker:
                             # 1. Must be working today
                   self.get_ab_combined_priority(p, d_idx), # 2. A/B Combined Priority
                   # SUBTRACT Urgency: If urgency is 10000, holiday score becomes -10000
+                  self.rank_preferences_for_day(p,d_idx),
                   self.get_priority_score(p, d_idx),
-                  self.rank_preferences_for_day(p,d_idx), # 2. Your Streak Points (2nd holiday, etc)
+                  # 2. Your Streak Points (2nd holiday, etc)
                   self.people.index(p)                    # 4. Rank Tie-breaker
                 ), reverse=True)
                 
+                if d_idx + 2 in self.sundays:
+                  get_workingcount = self.number_working_3_in_a_row(d_idx)
+                  get_workingcount_people = list(get_workingcount.keys())
+                  get_workingcount_people_length = len(get_workingcount_people)
+                  for p in get_workingcount_people:
+                      if self.schedule[p][d_idx]==1:
+                        get_workingcount_people_length -=1
+                        get_workingcount_people.remove(p)
+                  if get_workingcount_people_length >= 3 and candidates[0] not in get_workingcount_people and self._needs_holiday_today(candidates[0],d_idx)!=True :
+                      for i, p in enumerate(candidates):
+                          if p in get_workingcount_people:
+                              candidates.insert(0, candidates.pop(i))
+                              break
+                          
+                print('candidates0',candidates)
+
+                if d_idx+1 in self.zeezwemmen:
+                    candidates = sorted(self.people, key=lambda p: (
+                    self.schedule[p][d_idx] == 2 and (not self.must_work_today(p, d_idx) or self._needs_holiday_today(p, d_idx)),
+                    self._needs_holiday_today(p, d_idx),
+                              # 1. Must be working today
+                    self.get_ab_combined_priority(p, d_idx), # 2. A/B Combined Priority
+                    # SUBTRACT Urgency: If urgency is 10000, holiday score becomes -10000
+                    self.rank_preferences_for_day(p,d_idx),
+                    # 2. Your Streak Points (2nd holiday, etc)
+                    self.people.index(p)                    # 4. Rank Tie-breaker
+                  ), reverse=True)
 
 
 
@@ -1068,11 +1282,12 @@ class ScheduleMaker:
 
 
         return self.schedule, self.num_days
-
     def _needs_holiday_today(self, p, d_idx):
+        if self._needs_holiday(p, d_idx)==True:
+            return True
         worked_so_far = sum(1 for d in range(d_idx) if self.schedule[p][d] == 0)
         confirmed_future_work = sum(1 for d in range(d_idx, self.num_days) if self.schedule[p][d] == 0)
-        unassigned_days = sum(1 for d in range(d_idx, self.num_days) if self.schedule[p][d] == 2)
+        unassigned_days = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 2)
 
 
         holidays_so_far = sum(1 for d in range(d_idx) if self.schedule[p][d] == 1)
@@ -1141,7 +1356,7 @@ class ScheduleMaker:
         available_days = unassigned_days  # days still flexible
         #print('available days', unassigned_days, 'remaining work needed', remaining_work_needed)
 
-        if remaining_work_needed >= available_days:
+        if self.schedule[p][d_idx] ==2 and remaining_work_needed >= available_days:
             print('needs work today',d_idx,p)
             return False
         
@@ -1150,11 +1365,178 @@ class ScheduleMaker:
         remaining_off_needed = target_off_days - holidays_so_far - confirmed_future_holidays
           # days still flexible
         #print('available days', unassigned_days, 'remaining work needed', remaining_work_needed)
-        if remaining_off_needed + (remaining_off_needed +confirmed_future_holidays)//4 >= available_days:
+        if self.schedule[p]==2 and (remaining_off_needed + (remaining_off_needed +confirmed_future_holidays)//4 >= available_days):
             print('needs holiday today (off budget)', d_idx, p)
             return True
 
         return False
+
+    def _needs_holiday(self, p, d_idx):
+        worked_so_far = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 0)
+        unassigned_days = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 2)
+        holidays_so_far = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 1)
+
+        for past_d in range(max(0, d_idx - 5), d_idx):
+            if self.schedule[p][past_d] == 2:  # still unassigned
+                # Check if this past day was a Sunday
+                # Assumes day 0 = Monday; adjust offset if your week starts differently
+                if past_d+1 in self.sundays:  # Sunday
+                    # Next day is a Sunday
+                    sundays_worked = sum(1 for s in self.sundays if self.schedule[p][s-1] == 0)
+                    
+                    sundays_remaining = sum(1 for s in self.sundays if self.schedule[p][s-1] == 2)
+                    sunday_debt = self.sunday_quotas[p] - sundays_worked
+                    if sunday_debt >=sundays_remaining and (self.schedule[p][past_d] == 2):
+                        # Still have Sunday work quota to fill → work on Sunday
+                        self.schedule[p][past_d] = 0
+
+                    
+                if past_d+1 in self.fixed_holidays:  # Sunday
+                    # Next day is a Sunday
+                    fholidays_worked = sum(1 for s in self.fixed_holidays if self.schedule[p][s-1] == 0)
+                    
+                    fholidays_remaining = sum(1 for s in self.fixed_holidays if self.schedule[p][s-1] == 2)
+                    fholidays_debt = self.fixedh_quotas[p] - fholidays_worked
+                    if fholidays_debt >=fholidays_remaining and (self.schedule[p][past_d] == 2):
+                        # Still have Sunday work quota to fill → work on Sunday
+                        self.schedule[p][past_d] = 0
+                if self.schedule[p][past_d] == 2:
+                    simulated = self.schedule[p].copy()
+                    simulated[past_d] = 0  # imagine sunday/holiday worked
+                    simulated[d_idx] = 0   # imagine today worked
+                    
+                    # count streak around past_d
+                    streak = 0
+                    max_streak = 0
+                    for d in range(max(0, past_d - 4), min(self.num_days, d_idx + 1)):
+                        if simulated[d] == 0:
+                            streak += 1
+                            max_streak = max(max_streak, streak)
+                        else:
+                            streak = 0
+                    
+                    if max_streak > 5:
+                      if past_d+1 in self.fixed_holidays: 
+                        # would create too long a streak -> try assign off
+                        fholidays_worked = sum(1 for s in self.fixed_holidays if self.schedule[p][s-1] == 0)
+                    
+                        fholidays_remaining = sum(1 for s in self.fixed_holidays if self.schedule[p][s-1] == 2)
+                        fholidays_debt = self.fixedh_quotas[p] - fholidays_worked
+                        if fholidays_debt >=fholidays_remaining and (self.schedule[p][past_d] == 2):
+                            # Still have Sunday work quota to fill → work on Sunday
+                            self.schedule[p][past_d] = 0
+                            return True
+                        else:
+                            self.schedule[p][past_d] = 1
+                      if past_d+1 in self.sundays:  # Sunday
+                        # Next day is a Sunday
+                        sundays_worked = sum(1 for s in self.sundays if self.schedule[p][s-1] == 0)
+                        
+                        sundays_remaining = sum(1 for s in self.sundays if self.schedule[p][s-1] == 2)
+                        sunday_debt = self.sunday_quotas[p] - sundays_worked
+                        if sunday_debt >=sundays_remaining and (self.schedule[p][past_d] == 2):
+                            # Still have Sunday work quota to fill → work on Sunday
+                            self.schedule[p][past_d] = 0
+                            return True
+                        else:
+                            self.schedule[p][past_d] = 1
+                            
+                    
+        hist = self.schedule[p][max(d_idx-5,0):d_idx]
+
+        future = self.schedule[p][d_idx+1:min(d_idx+6,self.num_days)]
+        near_future = self.schedule[p][d_idx+2:min(d_idx+8,self.num_days)]
+        # Calculate streaks
+        work_streak = 0
+        off_streak = 0
+
+        for day in hist:
+            if day == 0:
+                work_streak += 1
+                off_streak = 0 # Reset off streak if we find work
+            elif day == 1:
+                off_streak += 1
+                work_streak = 0 # Reset work streak if we find off
+            else: # day == 2 (unassigned)
+                work_streak = 0
+                off_streak = 0 # Reset off streak if we find work
+
+        work_streak_a = 0
+        off_streak_a = 0
+        if len(future) >1:
+          for day in future[::-1]:
+              if day == 0:
+                  work_streak_a += 1
+                  off_streak_a =0
+              elif day == 1:
+                  off_streak_a += 1
+                  work_streak_a =0
+              else:
+                  work_streak_a=0
+                  off_streak_a=0
+        work_streak_n = 0
+        off_streak_n = 0
+        if len(near_future) > 1 :
+            for day in near_future[::-1]:
+                if day == 0:
+                    work_streak_n += 1
+                    off_streak_n= 0 # Reset off streak if we find work
+                elif day == 1:
+                    off_streak_n += 1
+                    work_streak_n = 0
+                else:
+                    work_streak_n = 0
+                    off_streak_n = 0
+
+        if work_streak + work_streak_a >=5:
+            print('need holiday today, because reached maximum')
+            return True
+        if off_streak >=3 and work_streak_n>=5:
+            return False
+        if work_streak >=4 and off_streak_n >=4:
+            print('needs holiday today for future')
+            return True
+        if work_streak_a + work_streak >=4:
+            unassigned_days-=1
+
+        
+
+
+        
+        
+        # ── off-budget check: must take holiday ────────────────
+        target_off_days = self.num_days - self.targets[p]
+        remaining_off_needed = target_off_days - holidays_so_far 
+        
+        if self.schedule[p][d_idx] ==2 and remaining_off_needed >= unassigned_days:
+            return True
+
+
+
+        target_work_days = self.targets[p]
+        remaining_work_needed = target_work_days - worked_so_far 
+        #print('available days', unassigned_days, 'remaining work needed', remaining_work_needed)
+        
+
+        
+        worked_total = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 0)
+        if self.schedule[p][d_idx] == 2 and worked_total >= self.targets[p]:
+            print(f'over target, needs holiday {d_idx} {p}')
+            return True
+
+        target_work_days = self.targets[p]
+        remaining_work_needed = target_work_days - worked_so_far 
+        available_days = unassigned_days  # days still flexible
+        #print('available days', unassigned_days, 'remaining work needed', remaining_work_needed)
+
+        if self.schedule[p][d_idx] ==2 and remaining_work_needed >= unassigned_days:
+            print('needs work today',d_idx,p)
+            return False
+
+
+
+        return False
+    
 
 
     def must_work_today(self,p, d_idx):
@@ -1163,9 +1545,38 @@ class ScheduleMaker:
         — i.e. they have no holiday budget left, or every remaining day must be work.
         """
         # No holiday budget left
+        if self.must_work(p,d_idx) ==True:
+            return True
         worked_so_far = sum(1 for d in range(d_idx) if self.schedule[p][d] == 0)
         confirmed_future_work = sum(1 for d in range(d_idx, self.num_days) if self.schedule[p][d] == 0)
         unassigned_days = sum(1 for d in range(d_idx, self.num_days) if self.schedule[p][d] == 2)
+
+
+
+        target_work_days = self.targets[p]
+        remaining_work_needed = target_work_days - worked_so_far - confirmed_future_work
+        available_days = unassigned_days  # days still flexible
+        if d_idx==28:
+            print('available days', unassigned_days, 'remaining work needed', remaining_work_needed)
+            print(confirmed_future_work,'confirmed_futureWork')
+
+
+        if remaining_work_needed >= available_days:
+            return True
+
+
+
+
+        return False
+
+    def must_work(self,p, d_idx):
+        """
+        Returns True if giving this person a holiday today is mathematically impossible
+        — i.e. they have no holiday budget left, or every remaining day must be work.
+        """
+        # No holiday budget left
+        worked_so_far = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 0)
+        unassigned_days = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 2)
 
 
         hist = self.schedule[p][max(0, d_idx-5):d_idx]
@@ -1219,7 +1630,7 @@ class ScheduleMaker:
             unassigned_days-=1
 
         target_work_days = self.targets[p]
-        remaining_work_needed = target_work_days - worked_so_far - confirmed_future_work
+        remaining_work_needed = target_work_days - worked_so_far 
         available_days = unassigned_days  # days still flexible
         #print('available days', unassigned_days, 'remaining work needed', remaining_work_needed)
 
@@ -1230,13 +1641,14 @@ class ScheduleMaker:
         if (work_streak+work_streak_a ==4) and off_streak_n ==4:
           return False
 
-        if remaining_work_needed >= available_days:
+        if self.schedule[p][d_idx] ==2 and remaining_work_needed >= available_days:
             return True
 
 
 
 
         return False
+
     def rank_preferences_for_day(self, p, d_idx):
         """
         Returns a sorted list of (person, score) for all people who have a preference
@@ -1374,44 +1786,58 @@ class ScheduleMaker:
     def _can_take_holiday(self, p, d_idx):
       # already off
       if self.schedule[p][d_idx] == 1:
-          return False
+          print('alreadu off')
+          return True
 
       # A/B constraint
       partner = 'b' if p == 'a' else ('a' if p == 'b' else None)
       if partner and self.schedule[partner][d_idx] == 1:
+          print('partner has taken')
           return False
       if self.current_off(d_idx) >=3:
+          print('too many off')
           return False
       if self.current_off(d_idx) ==2:
           for pp in self.people:
               if self.schedule[pp][d_idx]!=1:
-                if self._needs_holiday_today(pp, d_idx):
+                if self._needs_holiday_today(pp, d_idx) and pp !=p:
+                    self.schedule[pp][d_idx] =1
+                    self.schedule[p][d_idx]=0
+                    print('someone else needs holiday')
                     return False
           if p not in ['a','b']:
               print('d',d_idx)
               print(self.get_ab_combined_priority('a',d_idx), 'ab priority')
               if self.get_ab_combined_priority('a',d_idx) >0 and self.schedule['a'][d_idx] !=1 and self.schedule['b'][d_idx]!=1:
-                  print('d',d_idx)
-                  print(self.get_ab_combined_priority('a',d_idx), 'ab priority')
+                  for pp in self.people:
+                      if self.schedule[pp][d_idx]==2:
+                          if self._needs_holiday_today(pp, d_idx)==False and pp !=p and pp not in ['a','b']:
+                              self.schedule[pp][d_idx] =0
                   return False
       if self.current_off(d_idx) >=1:
           needs_holiday_index = 0
-          print(self.current_off(d_idx),'so many are currently off')
+          current_off_people = list(x for x in self.people if self.schedule[x][d_idx] == 1)
+          print(current_off_people,'current off people')
           for pp in self.people:
-              if self.schedule[pp][d_idx]!=1:
+              if self.schedule[pp][d_idx]!=1 and pp !=p:
                 print(pp,'p','needs holiday',self._needs_holiday_today(pp, d_idx))
-                if self._needs_holiday_today(pp, d_idx) == True : needs_holiday_index +=1
+                if self._needs_holiday_today(pp, d_idx) == True and pp not in current_off_people: needs_holiday_index +=1
           print(needs_holiday_index,'so many people need a holiday')
-          if needs_holiday_index + self.current_off(d_idx) >=3:
+          if needs_holiday_index + self.current_off(d_idx) >= 3:
+              self.schedule[p][d_idx] =0
+              print('too many people need a holiday')
               return False
 
       # 4-consecutive-off check
       hist_off = self.schedule[p][max(0, d_idx - 4):d_idx]
       if len(hist_off) >= 4 and all(x == 1 for x in hist_off):
+          self.schedule[p][d_idx] = 0
           return False
       if partner:
         hist_work_partner = self.schedule[partner][max(0, d_idx - 5):d_idx]
         if len(hist_work_partner) >= 5 and all(x == 0 for x in hist_work_partner):
+            self.schedule[partner][d_idx] = 1
+            self.schedule[p][d_idx] = 0
             return False
 
 
@@ -1419,19 +1845,28 @@ class ScheduleMaker:
       holiday_target = self.num_days - self.targets[p]
       holidays_taken = sum(1 for v in self.schedule[p] if v == 1)
       if holidays_taken >= holiday_target:
+          print('taken too many holidays taken')
           return False
 
-      num_days = self.num_days
-      holidays_after = holiday_target - holidays_taken - 1  # -1 for today
-      days_remaining = sum(1 for d in range(num_days) if self.schedule[p][d] == 2)
-      work_remaining = self.targets[p] - sum(1 for d in range(num_days) if self.schedule[p][d] == 0)
-      forced_break_days = holidays_after // 4  # every 4 off days needs 1 break
+      confirmed_work = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 0)
+      holidays_confirmed = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 1)
+      unassigned_days = sum(1 for d in range(self.num_days) if self.schedule[p][d] == 2)
+      
 
-      if work_remaining + forced_break_days >= days_remaining:
-          print('not possible')
-          print('work remain',work_remaining)
-          print('forced_break_days',forced_break_days)
-          print('days remaining',days_remaining)
+      remaining_work_needed = self.targets[p] - confirmed_work
+      available_days = unassigned_days
+
+      remaining_holidays_needed = self.num_days - self.targets[p] - holidays_confirmed
+
+
+      future = self.schedule[p][:]
+
+      confirmed_blocks = self.holiday_blocks([x for x in future])
+      x = max(0,(remaining_work_needed)//5 -confirmed_blocks)
+      
+
+
+      if remaining_work_needed + x >= available_days:
           return False
 
       # sunday-specific checks
@@ -1455,12 +1890,32 @@ class ScheduleMaker:
           current_debt = self.sunday_quotas.get(p, 0) - sum(
               1 for s in self.sundays if self.schedule[p][s - 1] == 1
           )
-          print(p)
-          print('current debt', current_debt)
-          print('remaining sundays', available_sundays)
+          
           if current_debt >= available_sundays:
               return False
-          print('can take holiday',p, day_num)
+      if day_num in self.fixed_holidays:
+            # can't take more sunday-offs than budget allows
+            fixed_holidays_off_budget = len(self.fixed_holidays) - self.fixedh_quotas.get(p, 0)
+            fixed_holidays_already_off = sum(1 for s in self.fixed_holidays if self.schedule[p][s - 1] == 1)
+            if fixed_holidays_already_off >= fixed_holidays_off_budget:
+                print('HOLIDAY not allowed')
+                return False
+
+
+            available_fixedh= sum(
+                1
+                for s in self.fixed_holidays
+                if self.schedule[p][s - 1] in (0, 2)
+            )
+            # can't take this sunday off if debt can't be fulfilled on remaining sundays
+            current_debt = self.fixedh_quotas.get(p, 0) - sum(
+                1 for s in self.fixed_holidays if self.schedule[p][s - 1] == 1
+            )
+            
+            if current_debt >= available_fixedh:
+                return False
+            
+
 
       return True
 
