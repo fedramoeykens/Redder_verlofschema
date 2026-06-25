@@ -775,7 +775,7 @@ class ScheduleMaker:
                     -sunday_debt[p]
                 ), reverse=True
             )
-            
+
             print(unset_sorted,'unset_sorted')
             print('already off',already_off)
             print( 'already working',already_working)
@@ -838,10 +838,10 @@ class ScheduleMaker:
         h_flex= {p: self.fixedh_quotas[p] - sum(1 for t in self.fixed_holidays if self.schedule[p][t - 1] == 0 or self.schedule[p][t-1]==2)
             for p in self.people
         }
-      
+
 
         for i, s in enumerate(free_h):
-            
+
             d_idx = s - 1
 
             print(d_idx,'d_idx')
@@ -869,7 +869,7 @@ class ScheduleMaker:
                     self.schedule[worker][d_idx] = 0
                     h_debt[worker] = max(0, h_debt[worker] - 1)
 
-        
+
 
         free_h = [s for s in self.fixed_holidays if s not in self.forced_days]
 
@@ -884,7 +884,7 @@ class ScheduleMaker:
         }
 
         for i, s in enumerate(free_h):
-            
+
             d_idx = s - 1
 
             print(d_idx,'d_idx')
@@ -977,8 +977,8 @@ class ScheduleMaker:
                 print(y,'ab')
                 print(z,'-hdebt')
 
-            
-                        
+
+
 
             for p in list(unset_sorted):
                   if workers_needed <=0 or h_debt[p]==0:
@@ -1025,7 +1025,7 @@ class ScheduleMaker:
             print(f"  {p}: {self.schedule[p]}")
 
 
-    
+
 
     def count_future_mandatory_work_before(self, p, d_idx):
         # How many Sundays has p already worked?
@@ -1391,29 +1391,21 @@ class ScheduleMaker:
                   get_workingcount = self.number_working_3_in_a_row(d_idx)
                   get_workingcount_people = list(get_workingcount.keys())
                   get_workingcount_people_length = len(get_workingcount_people)
+                  
                   for p in get_workingcount_people:
                       if self.schedule[p][d_idx]==1:
                         get_workingcount_people_length -=1
                         get_workingcount_people.remove(p)
                   if get_workingcount_people_length >= 3 and candidates[0] not in get_workingcount_people and self._needs_holiday_today(candidates[0],d_idx)!=True :
                       for i, p in enumerate(candidates):
-                          if p in get_workingcount_people:
-                              candidates.insert(0, candidates.pop(i))
-                              break
+                          if self.schedule[p][d_idx+1] ==0:
+                            if p in get_workingcount_people:
+                                candidates.insert(0, candidates.pop(i))
+                                break
 
                 print('candidates0',candidates)
 
-                if d_idx+1 in self.zeezwemmen:
-                    candidates = sorted(self.people, key=lambda p: (
-                    self.schedule[p][d_idx] == 2 and (not self.must_work_today(p, d_idx) or self._needs_holiday_today(p, d_idx)),
-                    self._needs_holiday_today(p, d_idx),
-                              # 1. Must be working today
-                    self.get_ab_combined_priority(p, d_idx), # 2. A/B Combined Priority
-                    # SUBTRACT Urgency: If urgency is 10000, holiday score becomes -10000
-                    self.rank_preferences_for_day(p,d_idx),
-                    # 2. Your Streak Points (2nd holiday, etc)
-                    self.people.index(p)                    # 4. Rank Tie-breaker
-                  ), reverse=True)
+                
 
 
 
