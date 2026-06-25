@@ -713,7 +713,7 @@ class ScheduleMaker:
                     if self.schedule[p][future_s - 1] == 2
                 )
                 print('p',p,'future_available',future_avail, sunday_debt[p],'sunday debt')
-                if sunday_debt[p] > future_avail and workers_needed > 0:
+                if sunday_debt[p] >= future_avail and workers_needed > 0:
                     print('assign bigger than futur debt',p)
                     self.schedule[p][d_idx] = 0
                     assigned_workers.append(p)
@@ -730,7 +730,7 @@ class ScheduleMaker:
 
             if not has_ab_coverage and workers_needed > 0:
                 print('assign a or b')
-                
+
                 a_avail = True if self.schedule['a'][d_idx] == 2 else False
                 b_avail = True if self.schedule['b'][d_idx] == 2 else False
                 print(a_avail,b_avail, 'avail','bvail')
@@ -751,14 +751,14 @@ class ScheduleMaker:
                     print(assigned_workers,'assigned workers')
                     current_unset.remove(chosen)
                     print(current_unset,'current unset')
-            
 
 
-                
+
+
             def ab_score(p):
               if p in ['a', 'b']:
                   return 1   # first OR last depending on condition
-              return 2 
+              return 2
 
             unset_sorted = sorted(
                 current_unset,
@@ -823,160 +823,177 @@ class ScheduleMaker:
             print(f"  {p}: {self.schedule[p]}")
 
 
-
     def fill_holidays(self):
 
                 # Initialize your debt tracker
 
-        free_fixedh = [s for s in self.fixed_holidays if s not in self.forced_days]
+        free_h = [s for s in self.fixed_holidays if s not in self.forced_days]
 
-        fixedh_debt = {
-            p: max(0, self.fixedh_quotas[p] - sum(1 for t in self.fixed_holidays if self.schedule[p][t - 1] == 0))
-            for p in self.people
-            }
-        fixedh_flex= {
-            p: self.fixedh_quotas[p] - sum(1 for t in self.fixed_holidays if self.schedule[p][t - 1] == 0 or self.schedule[p][t-1]==2)
+
+        h_debt = {
+        p: max(0, self.fixedh_quotas[p] - sum(1 for t in self.fixed_holidays if self.schedule[p][t - 1] == 0))
+        for p in self.people
+        }
+        h_flex= {p: self.fixedh_quotas[p] - sum(1 for t in self.fixed_holidays if self.schedule[p][t - 1] == 0 or self.schedule[p][t-1]==2)
             for p in self.people
         }
+      
 
-        for i, s in enumerate(free_fixedh):
-
-
+        for i, s in enumerate(free_h):
+            
             d_idx = s - 1
+
+            print(d_idx,'d_idx')
+
 
             already_working = [p for p in self.people if self.schedule[p][d_idx] == 0]
             already_off     = [p for p in self.people if self.schedule[p][d_idx] == 1]
             current_unset   = [p for p in self.people if self.schedule[p][d_idx] == 2]
-
             assigned_workers = list(already_working)
             assigned_off     = list(already_off)
             workers_needed   = max(0, 4 - len(assigned_workers))
             for worker in list(current_unset):  # iterate over a copy
               if self._needs_holiday(worker, d_idx):
 
-                  if fixedh_flex[worker] <0:
-                      print('worker', worker, 'needs holiday today', d_idx, "sunday")
+                  if h_flex[worker] <0:
                       self.schedule[worker][d_idx] = 1
+                      h_flex[worker] = min(0, h_flex[worker] + 1)
                       assigned_off.append(worker)
                       current_unset.remove(worker)
-                      fixedh_flex[p] = min(0, fixedh_flex[p] + 1)
-
-
-
 
               else:
                 if self.must_work(worker, d_idx):
-                  if fixedh_debt[worker] > 0:
+                  print('worker',worker,'must work,')
+                  if h_debt[worker] > 0:
                     self.schedule[worker][d_idx] = 0
-                    already_working.append(worker)
-                    current_unset.remove(worker)
-                    workers_needed-=1
-                    fixedh_debt[p] = max(0, fixedh_debt[p] - 1)
+                    h_debt[worker] = max(0, h_debt[worker] - 1)
 
-        free_fixedh = [s for s in self.fixed_holidays if s not in self.forced_days]
+        
 
-        fixedh_debt = {
-            p: max(0, self.fixedh_quotas[p] - sum(1 for t in self.fixed_holidays if self.schedule[p][t - 1] == 0))
-            for p in self.people
-            }
-        fixedh_flex= {
+        free_h = [s for s in self.fixed_holidays if s not in self.forced_days]
+
+
+        h_debt = {
+        p: max(0, self.fixedh_quotas[p] - sum(1 for t in self.fixed_holidays if self.schedule[p][t - 1] == 0))
+        for p in self.people
+        }
+        h_flex= {
             p: self.fixedh_quotas[p] - sum(1 for t in self.fixed_holidays if self.schedule[p][t - 1] == 0 or self.schedule[p][t-1]==2)
             for p in self.people
         }
 
-        for i, s in enumerate(free_fixedh):
-
-
+        for i, s in enumerate(free_h):
+            
             d_idx = s - 1
+
+            print(d_idx,'d_idx')
+
 
             already_working = [p for p in self.people if self.schedule[p][d_idx] == 0]
             already_off     = [p for p in self.people if self.schedule[p][d_idx] == 1]
             current_unset   = [p for p in self.people if self.schedule[p][d_idx] == 2]
-
             assigned_workers = list(already_working)
             assigned_off     = list(already_off)
             workers_needed   = max(0, 4 - len(assigned_workers))
-
 
 
             # 1. ── MANDATORY FUTURE LOOK-AHEAD ──────────────────────────────────
             # If anyone's debt matches their remaining availability, they MUST work
             for p in list(current_unset):
                 future_avail = sum(
-                    1 for future_s in free_fixedh[i:]
-                    if self.schedule[p][future_s - 1] == 0 or self.schedule[p][future_s - 1] == 2
+                    1 for future_s in free_h[i:]
+                    if self.schedule[p][future_s - 1] == 2
                 )
-                if fixedh_debt[p] > future_avail and workers_needed > 0:
+                print('p',p,'future_available',future_avail, h_debt[p],'sunday debt')
+                if h_debt[p] >= future_avail and workers_needed > 0:
+                    print('assign bigger than futur debt',p)
                     self.schedule[p][d_idx] = 0
                     assigned_workers.append(p)
-                    fixedh_debt[p] = max(0, fixedh_debt[p] - 1)
+                    h_debt[p] = max(0,h_debt[p] - 1)
                     workers_needed -= 1
                     current_unset.remove(p)
 
             # 2. ── YOUR NEW RULE: FORCE A OR B FIRST IF NEITHER IS WORKING ──────
             # Check if a or b is already in the assigned_workers pool
-           
             if self.schedule['a'][d_idx] ==0 or  self.schedule['b'][d_idx] == 0:
                 has_ab_coverage= True
             else:
                 has_ab_coverage = False
 
-
             if not has_ab_coverage and workers_needed > 0:
-                a_avail = 'a' in current_unset
-                b_avail = 'b' in current_unset
+                print('assign a or b')
+
+                a_avail = True if self.schedule['a'][d_idx] == 2 else False
+                b_avail = True if self.schedule['b'][d_idx] == 2 else False
+                print(a_avail,b_avail, 'avail','bvail')
 
                 if a_avail or b_avail:
                     if a_avail and b_avail:
                         # Assign the one with the most Sundays still in debt
-                        chosen = 'a' if fixedh_debt['a'] >= fixedh_debt['b'] else 'b'
+                        chosen = 'a' if h_debt['a'] >= h_debt['b'] else 'b'
                     else:
                         chosen = 'a' if a_avail else 'b'
 
                     self.schedule[chosen][d_idx] = 0
+                    print(chosen,'chosen')
+                    print( assigned_workers,'aasigned workers')
                     assigned_workers.append(chosen)
-                    fixedh_debt[chosen] = max(0, fixedh_debt[chosen] - 1)
+                    h_debt[chosen] = max(0, h_debt[chosen] - 1)
                     workers_needed -= 1
+                    print(assigned_workers,'assigned workers')
                     current_unset.remove(chosen)
+                    print(current_unset,'current unset')
 
-           
+
+
+
             def ab_score(p):
               if p in ['a', 'b']:
-                  return 1    # first OR last depending on condition
-              return 2 
+                  return 1   # first OR last depending on condition
+              return 2
 
             unset_sorted = sorted(
                 current_unset,
                 key=lambda p: (
 
-                    h_true_dynamic := (
-                        fixedh_debt[p]
+                    sunday_true_dynamic := (
+                        h_debt[p]
                         - sum(
-                            1 for future_s in free_fixedh[i:]
+                            1 for future_s in free_h[i:]
                             if self.schedule[p][future_s - 1] ==2
                         )
                     ),ab_score(p),
 
-                    fixedh_debt[p]
+                    -h_debt[p]
                 ), reverse=True
             )
+            for p in list(unset_sorted):
+                print(p)
+                x =h_debt[p]- sum(1 for future_s in free_h[i:] if self.schedule[p][future_s - 1] ==2)
+                print(x)
+                y= ab_score(p)
+                z =-h_debt[p]
+                print(y,'ab')
+                print(z,'-hdebt')
 
-          
+            
+                        
 
-            for p in unset_sorted:
+            for p in list(unset_sorted):
                   if workers_needed <=0:
 
                     self.schedule[p][d_idx] = 1
                     assigned_off.append(p)
                     unset_sorted.remove(p)
-                    fixedh_flex[p] = min(0, fixedh_flex[p] + 1)
+                    h_flex[p] = min(0, h_flex[p] + 1)
 
                   else:
                     self.schedule[p][d_idx] = 0
                     assigned_workers.append(p)
                     unset_sorted.remove(p)
-                    fixedh_debt[p] = max(0, fixedh_debt[p] - 1)
+                    h_debt[p] = max(0, h_debt[p] - 1)
                     workers_needed -= 1
+                    print('assigned',p,'to workers')
 
 
 
@@ -984,8 +1001,7 @@ class ScheduleMaker:
             for p in assigned_off:
                 if self.schedule[p][d_idx] == 2:
                     self.schedule[p][d_idx] = 1
-                    fixedh_flex[p] = min(0, fixedh_flex[p] + 1)
-
+                    h_flex[p] = min(0, h_flex[p] + 1)
             print(assigned_off,'assigned off')
             print(assigned_workers,'assignd workers')
 
@@ -994,19 +1010,21 @@ class ScheduleMaker:
                 promoted = sorted(assigned_off, key=lambda p: self.people.index(p))[0]
                 self.schedule[promoted][d_idx] = 0
                 assigned_workers.append(promoted)
-                fixedh_debt[promoted] = max(0, fixedh_debt[promoted] - 1)
-                fixedh_flex[p] = min(0, fixedh_flex[p] - 1)
+                h_debt[promoted] = max(0, h_debt[promoted] - 1)
+                h_flex[p] = min(0, h_flex[p] - 1)
                 assigned_off.remove(promoted)
-            print(assigned_workers,'assigned_worke')
+                print(assigned_workers,'did a promotion')
 
             for p in self.people:
                 if self.schedule[p][d_idx] == 2:
                     self.schedule[p][d_idx] = 1
-                    fixedh_flex[p] = min(0, fixedh_flex[p] + 1)
+                    h_flex[p] = min(0, h_flex[p] + 1)
         print("Schedule after sundays pass:")
         for p in self.people:
             print(f"  {p}: {self.schedule[p]}")
 
+
+    
 
     def count_future_mandatory_work_before(self, p, d_idx):
         # How many Sundays has p already worked?
@@ -1289,6 +1307,8 @@ class ScheduleMaker:
             if day_num in self.forced_days:
                 continue
             if day_num in self.sundays:
+                continue
+            if day_num in self.fixed_holidays:
                 continue
             print(f"Day {d_idx+1}: " + " ".join(
                 f"{p}={sum(1 for d in range(d_idx) if self.schedule[p][d]==0)}w/{sum(1 for d in range(d_idx) if self.schedule[p][d]==1)}off"
