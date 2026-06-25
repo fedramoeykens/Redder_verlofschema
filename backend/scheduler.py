@@ -775,11 +775,12 @@ class ScheduleMaker:
                     -sunday_debt[p]
                 ), reverse=True
             )
+            
             print(unset_sorted,'unset_sorted')
             print('already off',already_off)
             print( 'already working',already_working)
             for p in list(unset_sorted):
-                  if workers_needed <=0:
+                  if workers_needed <=0 or sunday_debt[p]==0:
 
                     self.schedule[p][d_idx] = 1
                     assigned_off.append(p)
@@ -980,7 +981,7 @@ class ScheduleMaker:
                         
 
             for p in list(unset_sorted):
-                  if workers_needed <=0:
+                  if workers_needed <=0 or h_debt[p]==0:
 
                     self.schedule[p][d_idx] = 1
                     assigned_off.append(p)
