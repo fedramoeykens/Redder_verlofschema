@@ -1388,24 +1388,31 @@ class ScheduleMaker:
                 ), reverse=True)
 
                 if d_idx + 2 in self.sundays:
+                  print('sunday')
                   get_workingcount = self.number_working_3_in_a_row(d_idx)
                   get_workingcount_people = list(get_workingcount.keys())
                   get_workingcount_people_length = len(get_workingcount_people)
-                  
-                  for p in get_workingcount_people:
+                  print(get_workingcount_people_length,'lengh')
+                  print(get_workingcount_people,'people')
+                  for p in list(get_workingcount_people):
                       if self.schedule[p][d_idx]==1:
                         get_workingcount_people_length -=1
                         get_workingcount_people.remove(p)
+                      else:
+                        if self.schedule[p][d_idx+1]==1:
+                          get_workingcount_people_length -=1
+                          get_workingcount_people.remove(p)
                   if get_workingcount_people_length >= 3 and candidates[0] not in get_workingcount_people and self._needs_holiday_today(candidates[0],d_idx)!=True :
                       for i, p in enumerate(candidates):
-                          if self.schedule[p][d_idx+1] ==0:
+                          if self.schedule[p][d_idx+1] == 0:
                             if p in get_workingcount_people:
                                 candidates.insert(0, candidates.pop(i))
+                                print('replaced',p,self.schedule[p][d_idx+1])
                                 break
 
                 print('candidates0',candidates)
 
-                
+
 
 
 
