@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 const NAMES = ["a", "b", "c", "d", "e", "f", "g"];
 const CLICK_MS = 380;
@@ -28,6 +28,16 @@ function buildPrefs(prefs) {
     if (out[level]) out[level].push(Number(day));
   }
   return out;
+}
+
+// A person's "id" (a, b, c...) is the stable identifier used for the backend
+// payload and to match columns in the returned schedule table. It never
+// changes, even if the person's display name is edited or left blank.
+// getDisplayName resolves what should actually be *shown* to a human:
+// the typed name if present, otherwise "Redder A" / "Redder B" / etc.
+function getDisplayName(p) {
+  const trimmed = (p.name || "").trim();
+  return trimmed ? trimmed : `Redder ${(p.id || "").toUpperCase()}`;
 }
 
 const SUMMARY_LABELS = [
@@ -76,126 +86,306 @@ function Chip({ children, color, textColor }) {
   );
 }
 
-function exportControleXLSX({ result, days, forced, holidays, people, start }) {
+function colLetter(colIdx0) {
+  let n = colIdx0 + 1;
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+function cellAddr(r0, c0) {
+  return `${colLetter(c0)}${r0 + 1}`;
+}
+
+async function exportControleXLSX({ result, days, forced = [], holidays = [], people = [], start }) {
   if (!result || !result.length) return;
 
-  const dayRows = result.filter(isDataRow);
+  const startDate = new Date(start + "T00:00:00");
+  const targetYear = startDate.getFullYear();
+  const targetMonth = startDate.getMonth();
+  const daysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+
+  // Build (row, day) pairs together and drop anything that doesn't correspond
+  // to a real, valid day inside the target month (guards against upstream
+  // producing more rows than days, mismatched dates, duplicates, etc).
+  const pairs = result
+    .map((row, index) => ({ row, rawDay: days[index] }))
+    .filter(({ row }) => row && typeof row === "object")
+    .map(({ row, rawDay }) => ({
+      row,
+      day: rawDay instanceof Date ? rawDay : new Date(rawDay)
+    }))
+    .filter(({ day }) =>
+      day instanceof Date &&
+      !isNaN(day.getTime()) &&
+      day.getFullYear() === targetYear &&
+      day.getMonth() === targetMonth
+    );
+
+  const seen = new Set();
+  const dayRows = [];
+  const dayDates = [];
+  for (const { row, day } of pairs) {
+    const dom = day.getDate();
+    if (seen.has(dom) || dom > daysInMonth) continue;
+    seen.add(dom);
+    dayRows.push(row);
+    dayDates.push(day);
+  }
+
   const nPeople = people.length;
+
   const firstCol = 2;
   const aanwezigCol = firstCol + nPeople;
   const verlofCol = aanwezigCol + 1;
   const commandCol = verlofCol + 1;
-  const dataStartRow = 5;
 
-  const startDate = new Date(start + "T00:00:00");
-  const monthLabel = `${MONTHS_NL[startDate.getMonth()]} ${startDate.getFullYear()}`;
+  const titleRow = 0;
+  const headerRow = 1;
+  const nameRow = 2;
+  const dataStartRow = 4;
+
+  const monthLabel = `${MONTHS_NL[targetMonth]} ${targetYear}`;
+
   const lastDataRow = dataStartRow + dayRows.length - 1;
   const inactRow = lastDataRow + 2;
   const sunRow = inactRow + 1;
   const aanwezigRow = sunRow + 1;
-  const sunHolidayOffRow = aanwezigRow + 1;
-  const totalCols = commandCol + 1;
-  const totalRows = sunHolidayOffRow + 1;
+  const legendStart = aanwezigRow + 3;
 
-  const aoa = Array.from({ length: totalRows }, () => Array.from({ length: totalCols }, () => null));
-  const setAOA = (r, c, v) => { aoa[r][c] = v === undefined ? null : v; };
+  const legend = [
+    "CV= betaalde compensatiedag voor gewerkte feestdag",
+    "Blanco = GEPRESTEERDE DAG",
+    "V = INACTIVITEIT",
+    "",
+    "Bij afwezigheid van één der redders (ziekte, AO) zorgt het vaste team voor vervanging.",
+    "Redders B zijn belast met verantwoordelijkheid van eerste redders A bij hun afwezigheid."
+  ];
 
-  setAOA(1, 0, "Reddingsdienst dienstrooster");
-  setAOA(1, 4, monthLabel);
-  setAOA(2, firstCol, "PO");
-  if (nPeople > 1) setAOA(2, firstCol + 1, "2RED");
-  for (let i = 2; i < nPeople; i++) setAOA(2, firstCol + i, "R");
-  setAOA(2, aanwezigCol, "Aantal R aanwezig");
-  setAOA(2, verlofCol, "Aantal in verlof");
-  setAOA(2, commandCol, "Commando");
-  people.forEach((p, i) => setAOA(3, firstCol + i, p.name.toUpperCase()));
+  const totalRows = legendStart + legend.length;
 
-  const sundayHolidayRows = [];
-  dayRows.forEach((row, i) => {
-    const excelRow = dataStartRow + i;
-    const day = days[i];
-    const isSun = day.getDay() === 0;
-    const isHoliday = holidays.includes(day.getDate());
-    const isForcedRow = forced.includes(day.getDate());
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(`Controle ${monthLabel}`.slice(0, 31), {
+    pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+  });
 
-    if ((isSun || isHoliday) && !isForcedRow) sundayHolidayRows.push(excelRow);
+  const thin = { style: "thin", color: { argb: "FF000000" } };
+  const border = { top: thin, bottom: thin, left: thin, right: thin };
 
-    setAOA(excelRow, 0, WEEKDAYS_NL[day.getDay()]);
-    setAOA(excelRow, 1, `${day.getDate()} ${MONTHS_NL[day.getMonth()]}`);
+  const styleCell = (r0, c0, { bold = false, fill = null, align = "center", color = "FF000000" } = {}) => {
+    const cell = ws.getCell(r0 + 1, c0 + 1);
+    cell.font = { name: "Arial", size: 10, bold, color: { argb: color } };
+    cell.alignment = { horizontal: align, vertical: "middle" };
+    cell.border = border;
+    if (fill) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
+  };
 
-    people.forEach((p, pi) => {
-      let value;
-      if (Object.prototype.hasOwnProperty.call(row, p.name)) {
-        value = row[p.name];
+  const setVal = (r0, c0, v) => {
+    ws.getCell(r0 + 1, c0 + 1).value = v ?? "";
+  };
+
+  /* 1. Header & Titles */
+  setVal(titleRow, 0, "Reddingsdienst dienstrooster");
+  setVal(titleRow, 4, monthLabel);
+
+  setVal(headerRow, firstCol, "PO");
+  if (nPeople > 1) setVal(headerRow, firstCol + 1, "2RED");
+  for (let i = 2; i < nPeople; i++) setVal(headerRow, firstCol + i, "R");
+
+  setVal(headerRow, aanwezigCol, "Aantal R aanwezig");
+  setVal(headerRow, verlofCol, "Aantal in verlof");
+  setVal(headerRow, commandCol, "Controle");
+
+  // Name row: resolved display name (typed name, or "Redder A/B/C..." fallback)
+  people.forEach((p, i) => {
+    setVal(nameRow, firstCol + i, getDisplayName(p).toUpperCase());
+  });
+
+  /* 2. Process Data Rows */
+  const greyRows = [];
+  const sunHolidayRows = [];
+
+  dayRows.forEach((row, index) => {
+    const r = dataStartRow + index;
+    const day = dayDates[index];
+
+    const isSaturday = day.getDay() === 6;
+    const isSunday = day.getDay() === 0;
+    const holiday = holidays.includes(day.getDate());
+    const forcedDay = forced.includes(day.getDate());
+
+    if ((isSaturday || isSunday || holiday) && !forcedDay) greyRows.push(r);
+    if ((isSunday || holiday) && !forcedDay) sunHolidayRows.push(r);
+
+    setVal(r, 0, WEEKDAYS_NL[day.getDay()]);
+    setVal(r, 1, `${day.getDate()} ${MONTHS_NL[day.getMonth()]}`);
+
+    people.forEach((p, i) => {
+      let value = "";
+      if (Object.prototype.hasOwnProperty.call(row, p.id)) {
+        value = row[p.id];
       } else {
-        const found = Object.keys(row).find((k) => String(k).toLowerCase() === String(p.name).toLowerCase());
-        value = found ? row[found] : undefined;
+        const key = Object.keys(row).find(k => k.toLowerCase() === (p.id || "").toLowerCase());
+        if (key) value = row[key];
       }
 
-      const normalized = typeof value === "string" ? value.trim().toUpperCase() : value;
-      if (normalized === "WORK") value = "";
-      if (normalized === "OFF") value = "v";
-      setAOA(excelRow, firstCol + pi, value ?? "");
+      if (typeof value === "string") {
+        const v = value.trim().toUpperCase();
+        if (v === "WORK") value = "";
+        if (v === "OFF") value = "v";
+        if (v === "CV") value = "cv";
+      }
+
+      setVal(r, firstCol + i, value);
     });
   });
 
-  const sheet = XLSX.utils.aoa_to_sheet(aoa);
+  /* 3. Labels */
+  setVal(inactRow, 0, "Inactiviteit");
+  setVal(sunRow, 0, "Zon- en feestdagen");
+  setVal(aanwezigRow, 0, "Aanwezig");
+  legend.forEach((txt, i) => setVal(legendStart + i, 0, txt));
 
-  dayRows.forEach((row, i) => {
-    const excelRow = dataStartRow + i;
-    const startCell = XLSX.utils.encode_cell({ r: excelRow, c: firstCol });
-    const endCell = XLSX.utils.encode_cell({ r: excelRow, c: firstCol + nPeople - 1 });
-    const aanwezigRef = XLSX.utils.encode_cell({ r: excelRow, c: aanwezigCol });
-    const verlofRef = XLSX.utils.encode_cell({ r: excelRow, c: verlofCol });
-    const day = days[i];
-    const isSun = day.getDay() === 0;
-    const isHoliday = holidays.includes(day.getDate());
-    const isForcedRow = forced.includes(day.getDate());
+  /* 4. Daily Row Formulas (live formulas — command status is computed by
+     Excel itself, so it always reflects the current cell values, even
+     after manual edits) */
+  dayRows.forEach((row, index) => {
+    const r = dataStartRow + index;
+    const day = dayDates[index];
 
-    sheet[XLSX.utils.encode_cell({ r: excelRow, c: aanwezigCol })] = { t: "n", f: `COUNTBLANK(${startCell}:${endCell})` };
-    sheet[XLSX.utils.encode_cell({ r: excelRow, c: verlofCol })] = { t: "n", f: `COUNTIF(${startCell}:${endCell},"v")` };
-    sheet[XLSX.utils.encode_cell({ r: excelRow, c: commandCol })] = {
-      f: isForcedRow ? `IF(${aanwezigRef}>=${nPeople},"OK","NOK")` : `IF(AND(${aanwezigRef}>=4,${verlofRef}>=3),"OK","NOK")`
+    const startAddr = cellAddr(r, firstCol);
+    const endAddr = cellAddr(r, firstCol + nPeople - 1);
+    const aanwezigAddr = cellAddr(r, aanwezigCol);
+    const verlofAddr = cellAddr(r, verlofCol);
+
+    ws.getCell(r + 1, aanwezigCol + 1).value = { formula: `COUNTBLANK(${startAddr}:${endAddr})` };
+    ws.getCell(r + 1, verlofCol + 1).value = { formula: `COUNTIF(${startAddr}:${endAddr},"v")` };
+
+    const forcedDay = forced.includes(day.getDate());
+    ws.getCell(r + 1, commandCol + 1).value = {
+      formula: forcedDay
+        ? `IF(${aanwezigAddr}>=${nPeople},"OK","NOK")`
+        : `IF(AND(${aanwezigAddr}>=4,${verlofAddr}>=3),"OK","NOK")`
     };
   });
 
-  people.forEach((p, pi) => {
-    const c = firstCol + pi;
-    const col = XLSX.utils.encode_col(c);
-    sheet[XLSX.utils.encode_cell({ r: inactRow, c })] = { t: "n", f: `COUNTIF(${col}${dataStartRow + 1}:${col}${lastDataRow + 1},"v")` };
-    if (sundayHolidayRows.length) {
-      const refs = sundayHolidayRows.map((r) => `${col}${r + 1}`).join(",");
-      sheet[XLSX.utils.encode_cell({ r: sunRow, c })] = { t: "n", f: `COUNTIF(${refs},"v")` };
-      sheet[XLSX.utils.encode_cell({ r: sunHolidayOffRow, c })] = { t: "n", f: `COUNTIF(${refs},"v")` };
+  /* 5. Total Columns Formulas */
+  people.forEach((p, i) => {
+    const colIdx = firstCol + i;
+    const colName = colLetter(colIdx);
+    const startRowExcel = dataStartRow + 1;
+    const endRowExcel = lastDataRow + 1;
+
+    ws.getCell(inactRow + 1, colIdx + 1).value = {
+      formula: `COUNTIF(${colName}${startRowExcel}:${colName}${endRowExcel},"v")`
+    };
+
+    if (sunHolidayRows.length > 0) {
+      const vFormula = sunHolidayRows.map(r => `COUNTIF(${colName}${r + 1},"v")`).join("+");
+      const cvFormula = sunHolidayRows.map(r => `COUNTIF(${colName}${r + 1},"cv")`).join("+");
+      ws.getCell(sunRow + 1, colIdx + 1).value = { formula: `${vFormula}+${cvFormula}` };
     } else {
-      sheet[XLSX.utils.encode_cell({ r: sunRow, c })] = { t: "n", v: 0 };
-      sheet[XLSX.utils.encode_cell({ r: sunHolidayOffRow, c })] = { t: "n", v: 0 };
+      ws.getCell(sunRow + 1, colIdx + 1).value = 0;
     }
-    sheet[XLSX.utils.encode_cell({ r: aanwezigRow, c })] = { t: "n", f: `COUNTBLANK(${col}${dataStartRow + 1}:${col}${lastDataRow + 1})` };
+
+    ws.getCell(aanwezigRow + 1, colIdx + 1).value = {
+      formula: `COUNTBLANK(${colName}${startRowExcel}:${colName}${endRowExcel})`
+    };
   });
 
-  sheet[XLSX.utils.encode_cell({ r: inactRow, c: 0 })] = "Inactiviteit";
-  sheet[XLSX.utils.encode_cell({ r: sunRow, c: 0 })] = "Inactiviteit (Zon- en feestdagen)";
-  sheet[XLSX.utils.encode_cell({ r: aanwezigRow, c: 0 })] = "Aanwezig";
-  sheet[XLSX.utils.encode_cell({ r: sunHolidayOffRow, c: 0 })] = "Aantal OFF op zon-/feestdagen";
+  /* 6. Base Styling (border/font on every used cell) */
+  for (let r = 0; r < totalRows; r++) {
+    for (let c = 0; c <= commandCol; c++) {
+      const cell = ws.getCell(r + 1, c + 1);
+      if (cell.value !== null && cell.value !== undefined ) {
+        styleCell(r, c);
+      }
+    }
+  }
 
-  sheet["!ref"] = XLSX.utils.encode_range({
-    s: { r: 0, c: 0 },
-    e: { r: sunHolidayOffRow, c: commandCol }
+  for (let c = 0; c <= commandCol; c++) {
+    styleCell(titleRow, c, { bold: true, align: "center" });
+    styleCell(headerRow, c, { bold: true, fill: "FFD9EAD3" });
+    styleCell(nameRow, c, { bold: true, fill: "FFEDEDED" });
+  }
+
+  // Dark grey: Saturday / Sunday / holiday rows
+  greyRows.forEach(r => {
+    for (let c = firstCol; c < firstCol + nPeople; c++) {
+      styleCell(r, c, {  fill: "D9D9D9",
+  color: "000000" });
+    }
   });
 
-  sheet["!cols"] = [
-    { wch: 12 },
-    { wch: 15 },
-    ...people.map(() => ({ wch: 8 })),
-    { wch: 20 },
-    { wch: 18 },
-    { wch: 12 }
+  // Base bold styling for the Controle column (no static fill — color comes
+  // from the live conditional formatting rule below, so it always tracks
+  // the actual formula result even after manual edits).
+  dayRows.forEach((row, index) => {
+    const r = dataStartRow + index;
+    styleCell(r, commandCol, { bold: true });
+  });
+
+  /* 6b. Live conditional formatting for the Controle column: green when the
+     formula evaluates to "OK", red when "NOK". This is evaluated by Excel
+     itself on every recalculation, so it stays correct after edits. */
+  if (dayRows.length > 0) {
+    const firstAddr = cellAddr(dataStartRow, commandCol);
+    const lastAddr = cellAddr(lastDataRow, commandCol);
+    ws.addConditionalFormatting({
+      ref: `${firstAddr}:${lastAddr}`,
+      rules: [
+        {
+          type: "expression",
+          formulae: [`${firstAddr}="OK"`],
+          priority: 1,
+          style: {
+            font: { bold: true, color: { argb: "FF006100" } },
+            fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } }
+          }
+        },
+        {
+          type: "expression",
+          formulae: [`${firstAddr}="NOK"`],
+          priority: 2,
+          style: {
+            font: { bold: true, color: { argb: "FF9C0006" } },
+            fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } }
+          }
+        }
+      ]
+    });
+  }
+
+  /* 7. Worksheet Properties */
+  ws.columns = [
+    { width: 13 },
+    { width: 15 },
+    ...people.map(() => ({ width: 9 })),
+    { width: 18 },
+    { width: 16 },
+    { width: 12 }
   ];
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, sheet, `Controle ${monthLabel}`.slice(0, 31));
-  XLSX.writeFile(wb, `Controlebestand_verlofregeling_${monthLabel}.xlsx`);
+  for (let r = 0; r < totalRows; r++) {
+    ws.getRow(r + 1).height = r === titleRow ? 22 : 18;
+  }
+
+  /* 8. Export */
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `Controlebestand_verlofregeling_${monthLabel}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function SectionLabel({ children }) {
@@ -216,9 +406,14 @@ function QuotaGroup({ label, people, field, onChange }) {
       <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>{label}</div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {people.map((p, i) => (
-          <div key={p.name} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <div key={p.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             <label style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 500, textTransform: "uppercase" }}>
-              {p.name}
+              {p.id}
+              {p.name.trim() && (
+                <span style={{ fontWeight: 400, textTransform: "none", color: "var(--color-text-tertiary)" }}>
+                  {" · "}{p.name.trim()}
+                </span>
+              )}
             </label>
             <input
               type="number" min="0" value={p[field]}
@@ -232,7 +427,7 @@ function QuotaGroup({ label, people, field, onChange }) {
   );
 }
 
-function PersonBlock({ person, pi, days, forced, holidays, onTargetChange, onPrefClick }) {
+function PersonBlock({ person, pi, days, forced, holidays, onTargetChange, onNameChange, onPrefClick }) {
   const firstDow = days.length ? days[0].getDay() : 0;
   const PREF_COLORS = {
     high: { bg: "#1D9E75", text: "#fff", border: "#0F6E56" },
@@ -251,12 +446,25 @@ function PersonBlock({ person, pi, days, forced, holidays, onTargetChange, onPre
           width: 30, height: 30, borderRadius: "50%",
           background: "#E6F1FB", display: "flex", alignItems: "center",
           justifyContent: "center", fontSize: 12, fontWeight: 500, color: "#185FA5",
+          flexShrink: 0,
         }}>
-          {person.name.toUpperCase()}
+          {person.id.toUpperCase()}
         </div>
         <span style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-primary)" }}>
-          Redder {person.name.toUpperCase()}
+          Redder {person.id.toUpperCase()}
         </span>
+        <input
+          value={person.name}
+          onChange={(e) => onNameChange(e.target.value)}
+          placeholder="Naam invullen"
+          style={{
+            fontSize: 13, color: "var(--color-text-primary)",
+            border: "0.5px solid var(--color-border-tertiary)",
+            background: "var(--color-background-secondary)",
+            padding: "4px 8px", borderRadius: 6, outline: "none",
+            minWidth: 120,
+          }}
+        />
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           <label style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>Doeltal</label>
           <input
@@ -363,8 +571,12 @@ export default function App() {
   const [days, setDays] = useState([]);
   const [forced, setForced] = useState([]);
   const [holidays, setHolidays] = useState([]);
+  // Each person has a stable `id` (the letter, a/b/c/...) used internally for
+  // the backend payload and to match schedule columns, and an editable
+  // `name` shown in the UI/export. `name` starts blank; getDisplayName()
+  // falls back to "Redder A" etc. wherever it's needed.
   const [people, setPeople] = useState(
-    NAMES.map((n) => ({ name: n, sundayQuota: 3, holidayQuota: 1, target: 19, prefs: {} }))
+    NAMES.map((n) => ({ id: n, name: "", sundayQuota: 3, holidayQuota: 1, target: 19, prefs: {} }))
   );
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -442,7 +654,10 @@ export default function App() {
 
   const targetsWithinRange = days.length > 0 && people.every((p) => !Number.isFinite(p.target) || p.target <= days.length);
 
-  const namesUnique = new Set(people.map((p) => p.name)).size === people.length && people.length > 0;
+  // Uniqueness is checked on the *resolved* display name (typed name, or the
+  // "Redder A/B/C" fallback when blank) — since ids are always unique by
+  // construction, this only ever flags genuine duplicate typed names.
+  const namesUnique = new Set(people.map((p) => getDisplayName(p).toLowerCase())).size === people.length && people.length > 0;
 
   const checks = [
     {
@@ -489,7 +704,7 @@ export default function App() {
       show: false,
       pass: namesUnique,
       okLabel: "Alle redders hebben een unieke naam.",
-      failLabel: "Er zijn dubbele of ontbrekende namen bij de redders.",
+      failLabel: "Er zijn dubbele namen bij de redders.",
     },
   ];
 
@@ -502,10 +717,13 @@ export default function App() {
     setError(""); setResult(null); setLoading(true);
     const payload = {
       start, end, forced, fixed_holidays: holidays,
-      sun_quotas: Object.fromEntries(people.map((p) => [p.name, p.sundayQuota])),
-      fixed_holiday_quotas: Object.fromEntries(people.map((p) => [p.name, p.holidayQuota])),
-      targets: Object.fromEntries(people.map((p) => [p.name, p.target])),
-      prefs: Object.fromEntries(people.map((p) => [p.name, buildPrefs(p.prefs)])),
+      // Keyed by the stable letter id, not the (editable) display name —
+      // this is the contract the backend expects and matches the columns
+      // that come back in the schedule table.
+      sun_quotas: Object.fromEntries(people.map((p) => [p.id, p.sundayQuota])),
+      fixed_holiday_quotas: Object.fromEntries(people.map((p) => [p.id, p.holidayQuota])),
+      targets: Object.fromEntries(people.map((p) => [p.id, p.target])),
+      prefs: Object.fromEntries(people.map((p) => [p.id, buildPrefs(p.prefs)])),
     };
     try {
       const apiBase = (typeof window !== "undefined" && window.location.port === "5173") ? "http://localhost:8000" : window.location.origin;
@@ -630,8 +848,9 @@ export default function App() {
         <SectionLabel>Voorkeuren per redder</SectionLabel>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {people.map((p, pi) => (
-            <PersonBlock key={p.name} person={p} pi={pi} days={days} forced={forced} holidays={holidays}
+            <PersonBlock key={p.id} person={p} pi={pi} days={days} forced={forced} holidays={holidays}
               onTargetChange={(v) => updatePerson(pi, "target", v)}
+              onNameChange={(v) => updatePerson(pi, "name", v)}
               onPrefClick={(d) => handlePrefClick(pi, d)} />
           ))}
         </div>
@@ -677,7 +896,7 @@ export default function App() {
                 <Chip color="var(--color-background-secondary)" textColor="var(--color-text-secondary)">VERLOF = v</Chip>
               </div>
             </div>
-            
+
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 onClick={() => exportCSV(result)}
