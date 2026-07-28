@@ -1,9 +1,15 @@
 import { useState, useEffect, useRef } from "react";
+import * as XLSX from "xlsx";
 
 const NAMES = ["a", "b", "c", "d", "e", "f", "g"];
 const CLICK_MS = 380;
 const PREF_LEVELS = { 1: "high", 2: "mid", 3: "low" };
 const DOW = ["Zo", "Ma", "Di", "Wo", "Do", "Vr", "Za"];
+const MONTHS_NL = [
+  "januari", "februari", "maart", "april", "mei", "juni",
+  "juli", "augustus", "september", "oktober", "november", "december",
+];
+const WEEKDAYS_NL = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
 
 function getDays(start, end) {
   const list = [];
@@ -24,6 +30,13 @@ function buildPrefs(prefs) {
   return out;
 }
 
+const SUMMARY_LABELS = [
+  "Total Work Days", "Total Sundays Worked", "Total Fixed Holidays Worked",
+  "Gewerkte dagen", "Gewerkte zondagen", "Gewerkte feestdagen",
+];
+const isDataRow = (row) => !SUMMARY_LABELS.includes(row.Date);
+
+// CSV Export Utility
 function exportCSV(result) {
   if (!result || !result.length) return;
   const headers = Object.keys(result[0]);
@@ -35,17 +48,21 @@ function exportCSV(result) {
       return v ?? "";
     })
   );
-  const csv = [headers, ...rows]
+  const csvContent = [headers, ...rows]
     .map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
     .join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "verlofschema.csv";
-  a.click();
-  URL.revokeObjectURL(url);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", "Verlofschema.csv");
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
+
+// Builds an .xlsx that mirrors the "Controlebestand verlofregeling" layout
 
 function Chip({ children, color, textColor }) {
   return (
@@ -57,6 +74,128 @@ function Chip({ children, color, textColor }) {
       {children}
     </span>
   );
+}
+
+function exportControleXLSX({ result, days, forced, holidays, people, start }) {
+  if (!result || !result.length) return;
+
+  const dayRows = result.filter(isDataRow);
+  const nPeople = people.length;
+  const firstCol = 2;
+  const aanwezigCol = firstCol + nPeople;
+  const verlofCol = aanwezigCol + 1;
+  const commandCol = verlofCol + 1;
+  const dataStartRow = 5;
+
+  const startDate = new Date(start + "T00:00:00");
+  const monthLabel = `${MONTHS_NL[startDate.getMonth()]} ${startDate.getFullYear()}`;
+  const lastDataRow = dataStartRow + dayRows.length - 1;
+  const inactRow = lastDataRow + 2;
+  const sunRow = inactRow + 1;
+  const aanwezigRow = sunRow + 1;
+  const sunHolidayOffRow = aanwezigRow + 1;
+  const totalCols = commandCol + 1;
+  const totalRows = sunHolidayOffRow + 1;
+
+  const aoa = Array.from({ length: totalRows }, () => Array.from({ length: totalCols }, () => null));
+  const setAOA = (r, c, v) => { aoa[r][c] = v === undefined ? null : v; };
+
+  setAOA(1, 0, "Reddingsdienst dienstrooster");
+  setAOA(1, 4, monthLabel);
+  setAOA(2, firstCol, "PO");
+  if (nPeople > 1) setAOA(2, firstCol + 1, "2RED");
+  for (let i = 2; i < nPeople; i++) setAOA(2, firstCol + i, "R");
+  setAOA(2, aanwezigCol, "Aantal R aanwezig");
+  setAOA(2, verlofCol, "Aantal in verlof");
+  setAOA(2, commandCol, "Commando");
+  people.forEach((p, i) => setAOA(3, firstCol + i, p.name.toUpperCase()));
+
+  const sundayHolidayRows = [];
+  dayRows.forEach((row, i) => {
+    const excelRow = dataStartRow + i;
+    const day = days[i];
+    const isSun = day.getDay() === 0;
+    const isHoliday = holidays.includes(day.getDate());
+    const isForcedRow = forced.includes(day.getDate());
+
+    if ((isSun || isHoliday) && !isForcedRow) sundayHolidayRows.push(excelRow);
+
+    setAOA(excelRow, 0, WEEKDAYS_NL[day.getDay()]);
+    setAOA(excelRow, 1, `${day.getDate()} ${MONTHS_NL[day.getMonth()]}`);
+
+    people.forEach((p, pi) => {
+      let value;
+      if (Object.prototype.hasOwnProperty.call(row, p.name)) {
+        value = row[p.name];
+      } else {
+        const found = Object.keys(row).find((k) => String(k).toLowerCase() === String(p.name).toLowerCase());
+        value = found ? row[found] : undefined;
+      }
+
+      const normalized = typeof value === "string" ? value.trim().toUpperCase() : value;
+      if (normalized === "WORK") value = "";
+      if (normalized === "OFF") value = "v";
+      setAOA(excelRow, firstCol + pi, value ?? "");
+    });
+  });
+
+  const sheet = XLSX.utils.aoa_to_sheet(aoa);
+
+  dayRows.forEach((row, i) => {
+    const excelRow = dataStartRow + i;
+    const startCell = XLSX.utils.encode_cell({ r: excelRow, c: firstCol });
+    const endCell = XLSX.utils.encode_cell({ r: excelRow, c: firstCol + nPeople - 1 });
+    const aanwezigRef = XLSX.utils.encode_cell({ r: excelRow, c: aanwezigCol });
+    const verlofRef = XLSX.utils.encode_cell({ r: excelRow, c: verlofCol });
+    const day = days[i];
+    const isSun = day.getDay() === 0;
+    const isHoliday = holidays.includes(day.getDate());
+    const isForcedRow = forced.includes(day.getDate());
+
+    sheet[XLSX.utils.encode_cell({ r: excelRow, c: aanwezigCol })] = { t: "n", f: `COUNTBLANK(${startCell}:${endCell})` };
+    sheet[XLSX.utils.encode_cell({ r: excelRow, c: verlofCol })] = { t: "n", f: `COUNTIF(${startCell}:${endCell},"v")` };
+    sheet[XLSX.utils.encode_cell({ r: excelRow, c: commandCol })] = {
+      f: isForcedRow ? `IF(${aanwezigRef}>=${nPeople},"OK","NOK")` : `IF(AND(${aanwezigRef}>=4,${verlofRef}>=3),"OK","NOK")`
+    };
+  });
+
+  people.forEach((p, pi) => {
+    const c = firstCol + pi;
+    const col = XLSX.utils.encode_col(c);
+    sheet[XLSX.utils.encode_cell({ r: inactRow, c })] = { t: "n", f: `COUNTIF(${col}${dataStartRow + 1}:${col}${lastDataRow + 1},"v")` };
+    if (sundayHolidayRows.length) {
+      const refs = sundayHolidayRows.map((r) => `${col}${r + 1}`).join(",");
+      sheet[XLSX.utils.encode_cell({ r: sunRow, c })] = { t: "n", f: `COUNTIF(${refs},"v")` };
+      sheet[XLSX.utils.encode_cell({ r: sunHolidayOffRow, c })] = { t: "n", f: `COUNTIF(${refs},"v")` };
+    } else {
+      sheet[XLSX.utils.encode_cell({ r: sunRow, c })] = { t: "n", v: 0 };
+      sheet[XLSX.utils.encode_cell({ r: sunHolidayOffRow, c })] = { t: "n", v: 0 };
+    }
+    sheet[XLSX.utils.encode_cell({ r: aanwezigRow, c })] = { t: "n", f: `COUNTBLANK(${col}${dataStartRow + 1}:${col}${lastDataRow + 1})` };
+  });
+
+  sheet[XLSX.utils.encode_cell({ r: inactRow, c: 0 })] = "Inactiviteit";
+  sheet[XLSX.utils.encode_cell({ r: sunRow, c: 0 })] = "Inactiviteit (Zon- en feestdagen)";
+  sheet[XLSX.utils.encode_cell({ r: aanwezigRow, c: 0 })] = "Aanwezig";
+  sheet[XLSX.utils.encode_cell({ r: sunHolidayOffRow, c: 0 })] = "Aantal OFF op zon-/feestdagen";
+
+  sheet["!ref"] = XLSX.utils.encode_range({
+    s: { r: 0, c: 0 },
+    e: { r: sunHolidayOffRow, c: commandCol }
+  });
+
+  sheet["!cols"] = [
+    { wch: 12 },
+    { wch: 15 },
+    ...people.map(() => ({ wch: 8 })),
+    { wch: 20 },
+    { wch: 18 },
+    { wch: 12 }
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet, `Controle ${monthLabel}`.slice(0, 31));
+  XLSX.writeFile(wb, `Controlebestand_verlofregeling_${monthLabel}.xlsx`);
 }
 
 function SectionLabel({ children }) {
@@ -236,9 +375,6 @@ export default function App() {
 
   const firstDow = days.length ? days[0].getDay() : 0;
 
-  // Sundays/holidays that actually need to be distributed via quotas.
-  // A forced (mandatory) day already has its coverage settled, so it's
-  // excluded from the pool that people's quotas need to add up to.
   const sunCount = days.filter(
     (d) => d.getDay() === 0 && !holidays.includes(d.getDate()) && !forced.includes(d.getDate())
   ).length;
@@ -291,9 +427,6 @@ export default function App() {
   const sumSunQuota = people.reduce((s, p) => s + (Number.isFinite(p.sundayQuota) ? p.sundayQuota : 0), 0);
   const sumHolQuota = people.reduce((s, p) => s + (Number.isFinite(p.holidayQuota) ? p.holidayQuota : 0), 0);
 
-  // Coverage requirements: both a normal day and a holiday need PEOPLE_PER_DAY
-  // people working. Only a verplichte (forced, single-click) day requires the
-  // full crew — and those are already excluded from these pools entirely.
   const PEOPLE_PER_DAY = 4;
   const sunRequired = sunCount * PEOPLE_PER_DAY;
   const holRequired = holCount * PEOPLE_PER_DAY;
@@ -308,8 +441,6 @@ export default function App() {
   const dateRangeValid = start !== "" && end !== "" && days.length > 0 && start <= end;
 
   const targetsWithinRange = days.length > 0 && people.every((p) => !Number.isFinite(p.target) || p.target <= days.length);
-
-  const noOverlap = forced.every((f) => !holidays.includes(f));
 
   const namesUnique = new Set(people.map((p) => p.name)).size === people.length && people.length > 0;
 
@@ -353,7 +484,6 @@ export default function App() {
       okLabel: "Geen enkel doeltal overschrijdt het aantal dagen in de periode.",
       failLabel: `Eén of meer doeltallen zijn hoger dan het aantal dagen in de periode (${days.length} dagen). Dat kan niet.`,
     },
-    
     {
       key: "names",
       show: false,
@@ -378,7 +508,8 @@ export default function App() {
       prefs: Object.fromEntries(people.map((p) => [p.name, buildPrefs(p.prefs)])),
     };
     try {
-      const res = await fetch(`${window.location.origin}/api/schedule`, {
+      const apiBase = (typeof window !== "undefined" && window.location.port === "5173") ? "http://localhost:8000" : window.location.origin;
+      const res = await fetch(`${apiBase}/api/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -546,13 +677,24 @@ export default function App() {
                 <Chip color="var(--color-background-secondary)" textColor="var(--color-text-secondary)">VERLOF = v</Chip>
               </div>
             </div>
-            <button
-              onClick={() => exportCSV(result)}
-              style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 18px", fontSize: 13, fontWeight: 500, background: "var(--color-background-primary)", color: "var(--color-text-primary)", border: "0.5px solid var(--color-border-secondary)", borderRadius: 8, cursor: "pointer" }}
-            >
-              <i className="ti ti-download" style={{ fontSize: 16 }} aria-hidden="true" />
-              Opslaan als CSV
-            </button>
+            
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => exportCSV(result)}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 18px", fontSize: 13, fontWeight: 500, background: "var(--color-background-primary)", color: "var(--color-text-primary)", border: "0.5px solid var(--color-border-secondary)", borderRadius: 8, cursor: "pointer" }}
+              >
+                <i className="ti ti-download" style={{ fontSize: 16 }} aria-hidden="true" />
+                Opslaan als CSV
+              </button>
+
+              <button
+                onClick={() => exportControleXLSX({ result, days, forced, holidays, people, start })}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 18px", fontSize: 13, fontWeight: 500, background: "var(--color-background-primary)", color: "var(--color-text-primary)", border: "0.5px solid var(--color-border-secondary)", borderRadius: 8, cursor: "pointer" }}
+              >
+                <i className="ti ti-download" style={{ fontSize: 16 }} aria-hidden="true" />
+                Opslaan als Excel (controlebestand)
+              </button>
+            </div>
           </div>
 
           <div style={{ overflowX: "auto" }}>

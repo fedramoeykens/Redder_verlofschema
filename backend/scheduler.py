@@ -69,7 +69,7 @@ class ScheduleMaker:
                     "mid": [],
                     "low": [],
                 }
-                
+
         self.unfulfilled_days = {p: set() for p in self.people}
         for p in self.people:
             print(f"  {p}: {self.prefs[p]}")
@@ -400,14 +400,14 @@ class ScheduleMaker:
                           if self._can_take_holiday(p_new,d_idx): #check if possible
                               self.schedule[p_new][d_idx] = 1
                               self.schedule[partner][d_idx] = 0
-                          
+
                         else:
                             if self._can_take_holiday(p_new,d_idx) and (p_new) not in ['a','b']: #check if possible
                                 self.schedule[p_new][d_idx] = 1
                         return False
-                    
+
                   elif len(candidates) >= 3 and self.get_ab_combined_priority('a', d_idx) == 0 and ('a' not in get_workingcount_people and 'b' not in get_workingcount_people) :
-                        
+
                         if (self.schedule['a'][d_idx] == 1 or self.schedule['b'][d_idx] == 1) and p!='a' and p!='b':
                             return False
                         else:
@@ -415,11 +415,11 @@ class ScheduleMaker:
                             self.schedule['b'][d_idx] = 0
 
 
-                    
+
                   elif len(candidates) >=3 and ('a' in get_workingcount_people or 'b' in get_workingcount_people) :
                         if self.schedule['a'][d_idx] != 1 or self.schedule['b'][d_idx] != 1:
                            return False
-                       
+
                         elif 'a' in get_workingcount_people :
                             p_new = 'a'
                             partner='b'
@@ -433,7 +433,7 @@ class ScheduleMaker:
                         return False
                   elif len(candidates) >= 3 and self.get_ab_combined_priority('a', d_idx) > 0:
                         return False
-                        
+
                   else:
                     pass
 
@@ -464,7 +464,7 @@ class ScheduleMaker:
 
                             self.get_priority_score(p, d_idx )                # 4. Rank Tie-breaker
                         ), reverse=True)
-                        
+
                         #ADDED THIS COMPLETELY
                         for candidate in list(candidates):
                             if self.schedule[candidate][d_idx] == 1:
@@ -472,7 +472,7 @@ class ScheduleMaker:
                         for candidate in list(candidates):
                                 if self.schedule[candidate][d_idx+1] == 1:
                                     candidates.remove(candidate)
-                        
+
                         if ['a','b'] in get_workingcount_people:
                             if self.schedule['a'][d_idx+1] == 0 and self.schedule['b'][d_idx+1] == 0:
                                 score_a = self.get_priority_score('a', d_idx)
@@ -485,32 +485,32 @@ class ScheduleMaker:
                                     partner = 'a'
                                 self.schedule[partner][d_idx] = 0
                                 self.schedule[p_new][d_idx] = 1
-                                
-                                    
+
+
                         if len(candidates) >=4:
                             remove = ['a','b',p]
-                            
-                                
+
+
                             for x in remove:
                                 if x in list(candidates):
                                     candidates.remove(x)
                             p_new = candidates[0]
-                            
+
                             if self.schedule['b'][d_idx] == 1 or self.schedule['a'][d_idx] == 1 or self.get_ab_combined_priority('a', d_idx)>0:
                                 if ['a','b'] in get_workingcount_people:
                                     pass
                                 else:
                                     if self._can_take_holiday(p_new,d_idx) and (p_new) not in ['a','b']: #check if possible
                                         self.schedule[p_new][d_idx] = 1
-                            else: 
+                            else:
                                 if self.get_ab_combined_priority('a', d_idx) ==0:
                                     self.schedule['a'][d_idx] = 0
                                     self.schedule['b'][d_idx] = 0
                                 if self._can_take_holiday(p_new,d_idx) and (p_new) not in ['a','b']: #check if possible
                                     self.schedule[p_new][d_idx] = 1
-                                        
+
                             return False
-                        
+
             if (d_idx + 1) in self.fixed_holidays:
                   get_workingcount = self.number_working_3_in_a_row(d_idx)
                   get_workingcount_people = list(get_workingcount.keys())
@@ -533,7 +533,7 @@ class ScheduleMaker:
 
                             self.get_priority_score(p, d_idx )                # 4. Rank Tie-breaker
                         ), reverse=True)
-                        
+
                         #ADDED THIS COMPLETELY
                         for candidate in list(candidates):
                             if self.schedule[candidate][d_idx] == 1:
@@ -541,7 +541,7 @@ class ScheduleMaker:
                         for candidate in list(candidates):
                                 if self.schedule[candidate][d_idx+1] == 1:
                                     candidates.remove(candidate)
-                        
+
                         if ['a','b'] in get_workingcount_people:
                             if self.schedule['a'][d_idx+1] == 0 and self.schedule['b'][d_idx+1] == 0:
                                 score_a = self.get_priority_score('a', d_idx)
@@ -554,35 +554,35 @@ class ScheduleMaker:
                                     partner = 'a'
                                 self.schedule[partner][d_idx] = 0
                                 self.schedule[p_new][d_idx] = 1
-                                
-                                    
+
+
                         if len(candidates) >=4:
                             remove = ['a','b',p]
-                            
-                                
+
+
                             for x in remove:
                                 if x in list(candidates):
                                     candidates.remove(x)
                             p_new = candidates[0]
-                            
+
                             if self.schedule['b'][d_idx] == 1 or self.schedule['a'][d_idx] == 1 or self.get_ab_combined_priority('a', d_idx)>0:
                                 if ['a','b'] in get_workingcount_people:
                                     pass
                                 else:
                                     if self._can_take_holiday(p_new,d_idx) and (p_new) not in ['a','b']: #check if possible
                                         self.schedule[p_new][d_idx] = 1
-                            else: 
+                            else:
                                 if self.get_ab_combined_priority('a', d_idx) ==0:
                                     self.schedule['a'][d_idx] = 0
                                     self.schedule['b'][d_idx] = 0
                                 if self._can_take_holiday(p_new,d_idx) and (p_new) not in ['a','b']: #check if possible
                                     self.schedule[p_new][d_idx] = 1
-                                        
-                            return False
-                        
-                        
 
-                       
+                            return False
+
+
+
+
 
 
 
@@ -615,7 +615,7 @@ class ScheduleMaker:
                     if self._needs_holiday('a',d_idx) == False and self._needs_holiday('b',d_idx)==False:
                       self.schedule['a'][d_idx] = 0
                       self.schedule['b'][d_idx] = 0
-                    
+
                     else:
                       print('could not get holiday due to needing holiday for A/B')
                       self.schedule[p][d_idx] =0
@@ -1373,7 +1373,7 @@ class ScheduleMaker:
         else:
             x = total_pairs_should - already_pairs
             print(x,'x')
-            
+
             total_pairs += x
 
             total_available-=x
@@ -1386,7 +1386,7 @@ class ScheduleMaker:
         already_pairs = sum(1 for s in self.fixed_holidays
                             if self.schedule['a'][s-1] == 0 and self.schedule['b'][s-1] == 0)
         total_pairs_should =  self.fixedh_quotas['a'] + self.fixedh_quotas['b'] - len(self.fixed_holidays)
-       
+
         if already_pairs == total_pairs_should:
             pass
         else:
@@ -1396,7 +1396,7 @@ class ScheduleMaker:
             total_pairs += x
             total_available-=x
 
-      
+
 
 
 
@@ -2074,7 +2074,8 @@ class ScheduleMaker:
         if off_streak_t == 4: return 0
         if work_streak_t == 5: return 1000 +diff
 
-        if off_streak_t == 1: return 600 +diff
+        if off_streak_t == 1 and off_streak ==1: return 600 +diff
+        if off_streak_t == 1 and off_streak_a ==1: return 510 +diff
         if work_streak_a ==4 or work_streak ==4: return 800  +diff
 
 
