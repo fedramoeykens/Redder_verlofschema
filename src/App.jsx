@@ -83,7 +83,7 @@ function QuotaGroup({ label, people, field, onChange }) {
             </label>
             <input
               type="number" min="0" value={p[field]}
-              onChange={(e) => onChange(i, +e.target.value)}
+              onChange={(e) => onChange(i, e.target.value === "" ? "" : +e.target.value)}
               style={{ width: 50, fontSize: 13 }}
             />
           </div>
@@ -122,7 +122,7 @@ function PersonBlock({ person, pi, days, forced, holidays, onTargetChange, onPre
           <label style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>Doeltal</label>
           <input
             type="number" value={person.target}
-            onChange={(e) => onTargetChange(+e.target.value)}
+            onChange={(e) => onTargetChange(e.target.value === "" ? "" : +e.target.value)}
             style={{ width: 56, fontSize: 13 }}
           />
         </div>
@@ -179,14 +179,53 @@ function PersonBlock({ person, pi, days, forced, holidays, onTargetChange, onPre
   );
 }
 
+function ValidationPanel({ checks, displayedChecks }) {
+  const allPass = checks.every((c) => c.pass);
+  return (
+    <div style={{
+      marginTop: 16,
+      padding: "1rem 1.25rem",
+      borderRadius: "var(--border-radius-lg)",
+      background: allPass ? "#EAF7EF" : "#FCEBEB",
+      border: `1px solid ${allPass ? "#8FCBA5" : "#EBB4B3"}`,
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8, marginBottom: 10,
+        fontSize: 13, fontWeight: 600,
+        color: allPass ? "#1D6B3E" : "#A32D2D",
+      }}>
+        <span style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 20, height: 20, borderRadius: "50%", fontSize: 12,
+          background: allPass ? "#1D9E75" : "#E24B4A", color: "#fff",
+        }}>
+          {allPass ? "✓" : "!"}
+        </span>
+        {allPass ? "Alles klopt — je kan het schema genereren" : "Controleer eerst het volgende"}
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+        {displayedChecks.map((c, i) => (
+          <li key={i} style={{
+            display: "flex", alignItems: "flex-start", gap: 8,
+            fontSize: 12.5, color: c.pass ? "#27500A" : "#A32D2D",
+          }}>
+            <span style={{ flexShrink: 0 }}>{c.pass ? "✓" : "✗"}</span>
+            <span>{c.pass ? c.okLabel : c.failLabel}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function App() {
-  const [start, setStart] = useState("2026-07-01");
-  const [end, setEnd] = useState("2026-07-31");
+  const [start, setStart] = useState("2026-08-01");
+  const [end, setEnd] = useState("2026-08-31");
   const [days, setDays] = useState([]);
   const [forced, setForced] = useState([]);
   const [holidays, setHolidays] = useState([]);
   const [people, setPeople] = useState(
-    NAMES.map((n) => ({ name: n, sundayQuota: 2, holidayQuota: 1, target: 19, prefs: {} }))
+    NAMES.map((n) => ({ name: n, sundayQuota: 3, holidayQuota: 1, target: 19, prefs: {} }))
   );
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -195,9 +234,15 @@ export default function App() {
 
   useEffect(() => { setDays(getDays(start, end)); }, [start, end]);
 
-  const sunCount = days.filter((d) => d.getDay() === 0 && !holidays.includes(d.getDate())).length;
-  const holCount = holidays.length;
   const firstDow = days.length ? days[0].getDay() : 0;
+
+  // Sundays/holidays that actually need to be distributed via quotas.
+  // A forced (mandatory) day already has its coverage settled, so it's
+  // excluded from the pool that people's quotas need to add up to.
+  const sunCount = days.filter(
+    (d) => d.getDay() === 0 && !holidays.includes(d.getDate()) && !forced.includes(d.getDate())
+  ).length;
+  const holCount = holidays.length;
 
   const toggleForced = (d) => {
     const dn = d.getDate();
@@ -240,7 +285,90 @@ export default function App() {
     clickState.current[key] = entry;
   };
 
+  // ---------- Validation ----------
+  const isValidNonNegNumber = (v) => v !== "" && Number.isFinite(v) && v >= 0;
+
+  const sumSunQuota = people.reduce((s, p) => s + (Number.isFinite(p.sundayQuota) ? p.sundayQuota : 0), 0);
+  const sumHolQuota = people.reduce((s, p) => s + (Number.isFinite(p.holidayQuota) ? p.holidayQuota : 0), 0);
+
+  // Coverage requirements: both a normal day and a holiday need PEOPLE_PER_DAY
+  // people working. Only a verplichte (forced, single-click) day requires the
+  // full crew — and those are already excluded from these pools entirely.
+  const PEOPLE_PER_DAY = 4;
+  const sunRequired = sunCount * PEOPLE_PER_DAY;
+  const holRequired = holCount * PEOPLE_PER_DAY;
+
+  const sunMatches = sumSunQuota === sunRequired;
+  const holMatches = sumHolQuota === holRequired;
+
+  const allNumbersValid = people.every(
+    (p) => isValidNonNegNumber(p.sundayQuota) && isValidNonNegNumber(p.holidayQuota) && isValidNonNegNumber(p.target)
+  );
+
+  const dateRangeValid = start !== "" && end !== "" && days.length > 0 && start <= end;
+
+  const targetsWithinRange = days.length > 0 && people.every((p) => !Number.isFinite(p.target) || p.target <= days.length);
+
+  const noOverlap = forced.every((f) => !holidays.includes(f));
+
+  const namesUnique = new Set(people.map((p) => p.name)).size === people.length && people.length > 0;
+
+  const checks = [
+    {
+      key: "period",
+      show: false,
+      pass: dateRangeValid,
+      okLabel: `Periode is geldig (${days.length} dagen).`,
+      failLabel: "Controleer de periode: startdatum moet vóór (of gelijk aan) einddatum liggen en het bereik mag niet leeg zijn.",
+    },
+    {
+      key: "numbers",
+      show: false,
+      pass: allNumbersValid,
+      okLabel: "Alle quota's en doeltallen zijn geldige getallen (0 of hoger).",
+      failLabel: "Alle quota's en doeltallen moeten ingevuld zijn met geldige getallen van 0 of hoger.",
+    },
+    {
+      key: "sunday",
+      show: true,
+      pass: sunMatches,
+      okLabel: `Zondagquota's kloppen: ${sumSunQuota} van ${sunRequired} benodigde toewijzingen (${sunCount} zondagen × ${PEOPLE_PER_DAY} personen).`,
+      failLabel: `Zondagquota's kloppen niet: ${sumSunQuota} toegewezen, maar er zijn ${sunRequired} toewijzingen nodig (${sunCount} zondagen × ${PEOPLE_PER_DAY} personen per dag) ${
+        sumSunQuota > sunRequired ? `(${sumSunQuota - sunRequired} te veel)` : `(${sunRequired - sumSunQuota} te weinig)`
+      }.`,
+    },
+    {
+      key: "holiday",
+      show: true,
+      pass: holMatches,
+      okLabel: `Feestdagquota's kloppen: ${sumHolQuota} van ${holRequired} benodigde toewijzingen (${holCount} feestdag${holCount !== 1 ? "en" : ""} × ${PEOPLE_PER_DAY} personen).`,
+      failLabel: `Feestdagquota's kloppen niet: ${sumHolQuota} toegewezen, maar er zijn ${holRequired} toewijzingen nodig (${holCount} feestdag${holCount !== 1 ? "en" : ""} × ${PEOPLE_PER_DAY} personen) ${
+        sumHolQuota > holRequired ? `(${sumHolQuota - holRequired} te veel)` : `(${holRequired - sumHolQuota} te weinig)`
+      }.`,
+    },
+    {
+      key: "targets",
+      show: false,
+      pass: targetsWithinRange,
+      okLabel: "Geen enkel doeltal overschrijdt het aantal dagen in de periode.",
+      failLabel: `Eén of meer doeltallen zijn hoger dan het aantal dagen in de periode (${days.length} dagen). Dat kan niet.`,
+    },
+    
+    {
+      key: "names",
+      show: false,
+      pass: namesUnique,
+      okLabel: "Alle redders hebben een unieke naam.",
+      failLabel: "Er zijn dubbele of ontbrekende namen bij de redders.",
+    },
+  ];
+
+  const canGenerate = checks.every((c) => c.pass);
+  const displayedChecks = checks.filter((c) => c.show);
+
+  // ---------- Generate ----------
   const generate = async () => {
+    if (!canGenerate) return;
     setError(""); setResult(null); setLoading(true);
     const payload = {
       start, end, forced, fixed_holidays: holidays,
@@ -273,11 +401,8 @@ export default function App() {
 
   const isSummaryRow = (row) => {
     const d = row.Date;
-    return d === "Gewerkte dagen" || d === "Gewerkte zondagen" || d === "Gewerkte feestdagen"
-      || d === "Gewerkte dagen" || d === "Gewerkte zondagen" || d === "Gewerkte feestdagen";
+    return d === "Gewerkte dagen" || d === "Gewerkte zondagen" || d === "Gewerkte feestdagen";
   };
-
-  const resultDayCount = result ? result.filter(r => !isSummaryRow(r)).length : 0;
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", padding: "2rem 1.5rem", maxWidth: 920, margin: "0 auto" }}>
@@ -300,6 +425,9 @@ export default function App() {
           <input type="date" value={start} onChange={(e) => setStart(e.target.value)} style={{ fontSize: 13 }} />
           <label style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>Tot</label>
           <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} style={{ fontSize: 13 }} />
+          {!dateRangeValid && (
+            <span style={{ fontSize: 12, color: "#A32D2D" }}>⚠ Controleer de periode</span>
+          )}
         </div>
       </div>
 
@@ -352,13 +480,15 @@ export default function App() {
       <div style={{ marginBottom: 24 }}>
         <div style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-lg)", padding: "1rem 1.25rem", border: "0.5px solid var(--color-border-tertiary)" }}>
           <p style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.6, marginBottom: 14 }}>
-            Er zijn <strong>{sunCount} zondagen</strong> — verdeel deze over de redders.{" "}
-            Er zijn <strong>{holCount} feestdag{holCount !== 1 ? "en" : ""}</strong> — verdeel deze eveneens.
+            Er zijn <strong>{sunCount} zondagen</strong> te verdelen (verplichte zondagen niet meegeteld), elk met {PEOPLE_PER_DAY} personen — dat zijn samen <strong>{sunRequired} toewijzingen</strong> om te verdelen.{" "}
+            {holCount === 1 ? "Er is" : "Er zijn"} <strong>{holCount} feestdag{holCount !== 1 ? "en" : ""}</strong>, elk met {PEOPLE_PER_DAY} personen — dat zijn samen <strong>{holRequired} toewijzingen</strong> om te verdelen.
           </p>
           <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
             <QuotaGroup label="Zondagquota" people={people} field="sundayQuota" onChange={(i, v) => updatePerson(i, "sundayQuota", v)} />
             <QuotaGroup label="Feestdagquota" people={people} field="holidayQuota" onChange={(i, v) => updatePerson(i, "holidayQuota", v)} />
           </div>
+
+          <ValidationPanel checks={checks} displayedChecks={displayedChecks} />
         </div>
       </div>
 
@@ -378,11 +508,26 @@ export default function App() {
 
       {/* Generate button */}
       <button
-        onClick={generate} disabled={loading}
-        style={{ padding: "10px 28px", fontSize: 14, fontWeight: 500, background: loading ? "var(--color-background-secondary)" : "#111", color: loading ? "var(--color-text-tertiary)" : "#fff", border: "none", borderRadius: 8, cursor: loading ? "not-allowed" : "pointer", transition: "background 0.15s" }}
+        onClick={generate}
+        disabled={loading || !canGenerate}
+        title={!canGenerate ? "Los eerst de openstaande controles hierboven op" : undefined}
+        style={{
+          padding: "10px 28px", fontSize: 14, fontWeight: 500,
+          background: (loading || !canGenerate) ? "var(--color-background-secondary)" : "#111",
+          color: (loading || !canGenerate) ? "var(--color-text-tertiary)" : "#fff",
+          border: "none", borderRadius: 8,
+          cursor: (loading || !canGenerate) ? "not-allowed" : "pointer",
+          transition: "background 0.15s",
+        }}
       >
         {loading ? "Bezig met genereren…" : "Schema genereren"}
       </button>
+
+      {!canGenerate && (
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--color-text-tertiary)" }}>
+          Los eerst de controles hierboven op ("Zondagquota" e.d.) voor je een schema genereert.
+        </div>
+      )}
 
       {error && (
         <div style={{ marginTop: 12, padding: "10px 14px", background: "#FCEBEB", color: "#A32D2D", borderRadius: 8, fontSize: 13 }}>
